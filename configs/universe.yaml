@@ -1,0 +1,57 @@
+# Universe: 40 liquid US equities across sectors.
+# NOTE: these are currently-listed tickers — this universe is NOT
+# survivorship-bias-free (see README "Limitations").
+tickers:
+  # Technology
+  - AAPL
+  - MSFT
+  - GOOGL
+  - NVDA
+  - META
+  - CRM
+  - ADBE
+  - ORCL
+  # Financials
+  - JPM
+  - BAC
+  - GS
+  - MS
+  - AXP
+  - BLK
+  # Industrials
+  - HON
+  - CAT
+  - UPS
+  - BA
+  - GE
+  - MMM
+  # Healthcare
+  - UNH
+  - JNJ
+  - PFE
+  - ABBV
+  - MRK
+  - TMO
+  # Energy
+  - XOM
+  - CVX
+  - COP
+  - SLB
+  # Consumer
+  - AMZN
+  - HD
+  - MCD
+  - NKE
+  - PG
+  - KO
+  - PEP
+  - WMT
+  - DIS
+  - COST
+
+benchmark: SPY
+
+data:
+  start_date: "2019-01-01"
+  end_date: "2024-01-01"
+  interval: "1d"

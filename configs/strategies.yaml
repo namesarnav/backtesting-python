@@ -1,0 +1,25 @@
+# Strategy registry. Each entry maps a name to a class path + params
+# consumed by strategies/__init__.py's `load_strategy`.
+
+momentum:
+  class: strategies.momentum.MomentumStrategy
+  params:
+    lookback: 126        # ~6 trading months
+    long_decile: 0.1
+    short_decile: 0.1
+    long_only: true
+
+mean_reversion:
+  class: strategies.mean_reversion.MeanReversionStrategy
+  params:
+    window: 20
+    entry_z: 1.0
+    exit_z: 0.25
+
+pairs:
+  class: strategies.pairs.PairsStrategy
+  params:
+    lookback: 252
+    entry_z: 2.0
+    exit_z: 0.5
+    pvalue_threshold: 0.05

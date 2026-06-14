@@ -1,0 +1,11 @@
+# Default backtest engine parameters.
+allocation: equal_weight   # equal_weight | vol_weighted
+transaction_cost_bps: 5
+slippage_bps: 2
+lag_days: 1                 # signal->trade lag; do not set to 0 (look-ahead)
+vol_lookback: 20            # used when allocation == vol_weighted
+
+walk_forward:
+  train_window_days: 504    # ~2 years
+  test_window_days: 126     # ~6 months
+  step_days: 126
