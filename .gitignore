@@ -2,9 +2,15 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-data/cache/
+# The per-ticker price cache IS committed: Yahoo blocks scripted clients, so a
+# fresh clone could not fetch it, and the Phase 8 checkpoint requires one
+# Docker command to reproduce the results. ~2.8MB for 41 tickers x 5 years.
+# The panel-level caches are pure derivations of those files (rebuilt in
+# ~0.1s), so they stay ignored.
+data/cache/panel_*.parquet
 data/*.parquet
-notebooks/results/*.png
+# notebooks/results/*.png is deliberately NOT ignored: the README embeds
+# these charts, and Phase 8 requires a clone to show them without a rebuild.
 notebooks/results/*.html
 .pytest_cache/
 .ipynb_checkpoints/
