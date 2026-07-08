@@ -103,11 +103,15 @@ class Strategy(ABC):
                 "otherwise a position would exit the instant it opened"
             )
 
-        long_side, short_side = (-1.0, 1.0) if invert else (1.0, -1.0)
+        # One multiplier rather than a long_side/short_side pair: naming the
+        # two sides invites exactly the bug this replaced, where the high-score
+        # branch was handed the wrong one and BOTH modes came out backwards.
+        # Read it as: a high score means +1 normally, -1 when inverted.
+        direction = -1.0 if invert else 1.0
 
         target = pd.DataFrame(float("nan"), index=score.index, columns=score.columns)
-        target = target.mask(score >= entry, short_side)
-        target = target.mask(score <= -entry, long_side)
+        target = target.mask(score >= entry, direction)
+        target = target.mask(score <= -entry, -direction)
         # Exit band is checked last so it wins on any overlap; the constructor
         # guard above means there shouldn't be one.
         target = target.mask(score.abs() <= exit_, 0.0)
