@@ -211,24 +211,39 @@ def plot_rolling_sharpe(
         std = r.rolling(window).std(ddof=1)
         return (mean / std.where(std > 0) * np.sqrt(TRADING_DAYS)).dropna()
 
+    # A window longer than the sample leaves nothing after dropna -- which
+    # happens routinely on short walk-forward folds. Skip those series rather
+    # than indexing into an empty array.
     if benchmark is not None:
         rb = rolling(benchmark)
-        ax.plot(rb.index, rb.values, color=BENCHMARK_COLOR, linewidth=1.6,
-                linestyle="--", zorder=2, label=benchmark_name)
+        if not rb.empty:
+            ax.plot(rb.index, rb.values, color=BENCHMARK_COLOR, linewidth=1.6,
+                    linestyle="--", zorder=2, label=benchmark_name)
 
+    plotted = False
     for i, (name, returns) in enumerate(sorted(returns_by_name.items())):
         rs = rolling(returns)
+        if rs.empty:
+            continue
+        plotted = True
         color = _color_for(name, i)
         ax.plot(rs.index, rs.values, color=color, linewidth=2.0, zorder=3, label=name)
         _direct_label(ax, rs.index[-1], rs.iloc[-1], name, color)
 
+    if not plotted:
+        ax.annotate(f"not enough history for a {window}-day window",
+                    xy=(0.5, 0.5), xycoords="axes fraction",
+                    ha="center", va="center", fontsize=10, color=INK_MUTED)
+
     ax.axhline(0.0, color=INK_MUTED, linewidth=1.0, zorder=1)
     _style_axis(ax, f"{window}-day rolling Sharpe")
-    _shade_events(ax, next(iter(returns_by_name.values())).index)
-    legend = ax.legend(loc="lower left", bbox_to_anchor=(0, 1.01), frameon=False,
-                       fontsize=9, ncol=4, borderaxespad=0, handlelength=1.6)
-    for text in legend.get_texts():
-        text.set_color(INK)
+    if returns_by_name:
+        _shade_events(ax, next(iter(returns_by_name.values())).index)
+    if ax.get_legend_handles_labels()[0]:
+        legend = ax.legend(loc="lower left", bbox_to_anchor=(0, 1.01), frameon=False,
+                           fontsize=9, ncol=4, borderaxespad=0, handlelength=1.6)
+        for text in legend.get_texts():
+            text.set_color(INK)
 
     fig.suptitle(f"Rolling {window}-day Sharpe ratio", x=0.02, y=0.985, ha="left",
                  fontsize=13, color=INK, weight="medium")
