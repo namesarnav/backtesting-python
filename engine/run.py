@@ -7,6 +7,7 @@ one file's worth of control flow:
         -> each strategy turns the panel into a signal panel
         -> VectorizedBacktester turns signals + prices into returns
         -> metrics scores them, walk-forward re-scores out of sample
+        -> the event-driven engine re-runs each one bar by bar, as a check
         -> viz renders the charts the README embeds
 
 No arguments, no manual steps, no network: the per-ticker price cache is
@@ -25,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from engine.backtest import VectorizedBacktester  # noqa: E402
+from engine.event_driven import reconcile  # noqa: E402
 from engine.data_loader import DataLoader  # noqa: E402
 from metrics.performance import summarize  # noqa: E402
 from metrics.validation import compare_to_benchmark, walk_forward  # noqa: E402
@@ -79,6 +81,50 @@ def _format_table(rows: list[dict], benchmark_row: dict) -> str:
             value = row.get(key)
             cells.append(head.format("-") if value is None else cell.format(value))
         lines.append("".join(cells))
+    return "\n".join(lines)
+
+
+def _format_reconciliation(panel, close, backtest_config: dict) -> str:
+    """Run every strategy through both engines and tabulate the difference.
+
+    This is the Phase 6 checkpoint, printed on every run rather than
+    asserted once: the two engines must agree on what they held (gross
+    return, to ~1e-5 with costs on) and may only disagree on what it cost.
+
+    The turnover columns are the interesting ones. The vectorized engine
+    measures turnover as the change in *target* weights; the event-driven
+    engine measures the change in *shares*, which also includes pulling
+    drifted positions back to target. The second number is always the
+    larger, and the gap is the cost the vectorized engine cannot see.
+    """
+    columns = [
+        ("strategy", "{:<16}", "{:<16}"),
+        ("gross diff", "{:>12}", "{:>12.1e}"),
+        ("vec return", "{:>12}", "{:>12.2%}"),
+        ("evt return", "{:>12}", "{:>12.2%}"),
+        ("vec turnover", "{:>14}", "{:>14.4f}"),
+        ("evt turnover", "{:>14}", "{:>14.4f}"),
+        ("cost gap", "{:>10}", "{:>10.2%}"),
+        ("fills", "{:>9}", "{:>9,d}"),
+    ]
+    header = "".join(head.format(name) for name, head, _ in columns)
+    lines = [header, "-" * len(header)]
+
+    for name in available_strategies():
+        signals = load_strategy(name).generate_signals(panel)
+        report = reconcile(close, signals, backtest_config)
+        row = {
+            "strategy": name,
+            "gross diff": report["max_gross_diff"],
+            "vec return": report["vectorized_total_return"],
+            "evt return": report["event_driven_total_return"],
+            "vec turnover": report["vectorized_avg_turnover"],
+            "evt turnover": report["event_driven_avg_turnover"],
+            "cost gap": report["cost_drag_diff"],
+            "fills": report["n_fills"],
+        }
+        lines.append("".join(cell.format(row[key]) for key, _, cell in columns))
+
     return "\n".join(lines)
 
 
@@ -172,6 +218,12 @@ def main() -> None:
                              benchmark_name=benchmark_ticker, output_dir=RESULTS_DIR):
         print(f"  {path.relative_to(REPO_ROOT)}")
     print(f"  {(RESULTS_DIR / 'results_table.txt').relative_to(REPO_ROOT)}")
+
+    reconciliation = _format_reconciliation(panel, close, backtest_config)
+    print(f"\nENGINE RECONCILIATION  (Phase 6: vectorized vs event-driven)\n")
+    print(reconciliation)
+    (RESULTS_DIR / "engine_reconciliation.txt").write_text(reconciliation + "\n")
+    print(f"\n  {(RESULTS_DIR / 'engine_reconciliation.txt').relative_to(REPO_ROOT)}")
 
     print("\nDone.")
 
