@@ -105,20 +105,27 @@ engine/data_loader.py   DataLoader
      │
      ├──────────────► strategies/*.py      generate_signals(panel) → signal panel
      │                   momentum · mean_reversion · pairs
-     ▼                          │
-engine/backtest.py  ◄───────────┘
-  VectorizedBacktester
-     normalize weights → LAG BY ONE DAY → returns → subtract costs
-     │
-     ▼
-  BacktestResult        returns · equity_curve · positions · trades · turnover
-     │
+     │                          │
+     ├──────────────────────────┤
+     ▼                          ▼
+engine/backtest.py         engine/event_driven.py
+  VectorizedBacktester       EventDrivenBacktester
+  whole-table maths          bar-by-bar loop, explicit cash + share state
+  normalize → LAG → cost     same weights, filled as orders at the close
+     │                          │
+     ▼                          ▼
+  BacktestResult             EventDrivenResult
+  returns · equity_curve ·     ...the same fields, plus
+  positions · trades ·         cash · holdings · equity · fill log
+  turnover                        │
+     │◄───────────────────────────┘
+     │      (either result works downstream — same field names)
      ├──► metrics/performance.py   Sharpe, Sortino, max DD, Calmar, win rate, turnover
      ├──► metrics/validation.py    walk-forward folds, SPY benchmark comparison
      └──► viz/plots.py             equity/drawdown, rolling Sharpe, comparison
 ```
 
-Four design decisions hold the whole thing together:
+Five design decisions hold the whole thing together:
 
 **One panel shape everywhere.** Prices and signals are both wide DataFrames
 with dates as rows and tickers as columns. Because they are identically
@@ -133,6 +140,11 @@ with no engine change.
 
 **Configuration is not code.** Universe, costs, lag, allocation method and
 walk-forward windows live in `configs/*.yaml`.
+
+**Two engines, one allocation step.** The event-driven engine calls the
+vectorized engine's `_target_weights`, so the two cannot disagree about *what
+to hold* — every difference in their output is attributable to *how it gets
+held*. That is what makes comparing them informative rather than noisy.
 
 **The lag is a single, deliberate, commented line.** See below.
 
@@ -170,6 +182,118 @@ Two subtler forms are handled too:
   backtesting on that same history is selection bias, and it is nastier than
   a missing `shift()` because every individual day's arithmetic still looks
   right. The −0.25 out-of-sample Sharpe above is what that costs.
+
+---
+
+## Vectorized vs event-driven
+
+`engine/backtest.py` computes the whole history in a handful of whole-table
+operations. `engine/event_driven.py` computes the same history by simulating
+it — one bar at a time, holding a cash balance and a share count per ticker,
+placing orders that get filled at the close.
+
+Building both was not redundancy. It was the only way to find out what the
+fast one was quietly assuming.
+
+### They agree exactly where they must
+
+With costs switched off, the two engines produce **identical gross returns**
+to floating-point precision (max difference ~1e-15 over 1,258 days). That is
+the assertion worth caring about: gross return is just "what I held times
+what it did", with no modelling choices in it. If it diverged, the engines
+would be disagreeing about the lag or the allocation, which is a bug rather
+than a difference of opinion.
+
+Getting there required fixing a real off-by-one. Filling at the close of bar
+*t* means the position established today is exposed to *tomorrow's* move —
+the simulation is already one bar lagged, structurally. So `lag_days = 1`
+maps to **zero** extra delay in the event loop, and the index offset is
+`t - (lag_days - 1)`. Writing the obvious `t - lag_days` double-lags the
+entire book: nothing crashes, the equity curve still looks plausible, and the
+two engines quietly disagree by one day forever.
+`test_positions_match_vectorized` is what pins this down.
+
+### They disagree on cost, and the event-driven engine is right
+
+```
+strategy          gross diff  vec return  evt return  vec turnover  evt turnover  cost gap    fills
+---------------------------------------------------------------------------------------------------
+mean_reversion       1.8e-05     -51.03%     -51.22%        0.2204        0.2251     0.41%   41,527
+momentum             5.2e-05     142.38%     140.77%        0.1721        0.1796     0.66%    4,960
+pairs                1.2e-05      14.77%      14.19%        0.0127        0.0185     0.51%      956
+```
+
+*(`python -m engine.run` prints this table; `gross diff` is above 1e-15 here
+only because costs are on — see the third bullet below.)*
+
+Event-driven turnover is higher for every strategy, and the total return is
+correspondingly lower. Three distinct mechanisms, in order of how much they
+matter:
+
+**1. Weight drift is a trade the vectorized engine cannot see.** The
+vectorized engine measures turnover as the change in *target* weights,
+`|w[t] − w[t−1]|`. Hold a permanently constant signal and that is zero
+forever — it charges for the initial buy-in and nothing after. But holding a
+constant *weight* is not holding a constant *position*: prices move
+overnight, the weights drift apart, and pulling them back to target is a real
+trade that a real broker really bills for. The event-driven engine tracks
+shares, so it sees those trades and charges for them.
+
+This shows up most starkly in **pairs**, where reported turnover rises 46%
+(0.0127 → 0.0185). Pairs holds a near-static two-leg position, so almost all
+of its true trading *is* drift correction — the exact category the vectorized
+engine is blind to. The strategy that looked cheapest to trade is the one
+whose costs were most understated.
+
+**2. Cost timing.** A trade decided from bar *t*'s close is filled at bar
+*t*'s close, so the cash leaves at bar *t*. The vectorized engine charges it
+against bar *t+1*, the day the position becomes effective. A one-bar shift in
+the cost series — immaterial to the total, visible day by day.
+
+**3. Orders are sized on pre-commission equity.** The commission is not known
+until the order exists, so the order is sized off current NAV and the fee
+comes out after. The book is therefore a fraction of a basis point above 100%
+gross once the fee is paid. This is what a live system does, and it is why
+gross returns match *exactly* only at zero cost; with 7bp of costs they agree
+to ~1e-5.
+
+None of these reverse a conclusion. Momentum still beats the benchmark on
+return and loses on Sharpe; mean-reversion is still bad; pairs is still a
+low-volatility, low-return book that fails out of sample. The engines are
+directionally consistent, which is the checkpoint. What changed is the
+confidence interval around the cost estimate — and the knowledge that it is
+biased optimistic in the vectorized engine, by more for low-turnover
+strategies than high-turnover ones.
+
+### What each approach is good for
+
+|  | Vectorized | Event-driven |
+|---|---|---|
+| Unit of thought | weights | shares and cash |
+| Speed (40 tickers × 5y) | ~15 ms | ~12–34 ms |
+| Can express whole-share orders | no | yes |
+| Can express a no-trade band | no | yes |
+| Sees weight drift | no | yes |
+| Tracks cash | no | yes |
+| Could place a live order | no | yes |
+
+The event-driven engine adds two frictions the vectorized one cannot
+represent at all, both off by default and both tested:
+
+- `fractional_shares: false` — whole-share orders only. A fixed rounding
+  error in dollars, so it dilutes as the account grows;
+  `test_whole_share_error_shrinks_with_capital` demonstrates exactly that.
+- `rebalance_threshold` — a no-trade band that skips orders below a given
+  fraction of equity. The standard fix for drift-driven churn: it cuts
+  turnover and cost at the price of letting weights wander from target.
+
+**Why real trading systems are event-driven.** Not for accuracy — for
+*identity*. In production the backtest and the live trader must be the same
+code path, and a live trader is inherently an event loop: a bar arrives, state
+updates, orders go out. A vectorized backtest cannot be run live at all; it
+needs the whole future in a DataFrame before it can compute anything. It is
+the right tool for research throughput, and it will lie to you about
+execution, quietly and in the optimistic direction.
 
 ---
 
@@ -248,12 +372,12 @@ Stated plainly, because a backtest that does not list these is hiding them.
 ```
 configs/     universe, strategy registry, backtest parameters (YAML)
 data/cache/  committed per-ticker Parquet price cache
-engine/      data_loader.py · backtest.py · run.py
+engine/      data_loader.py · backtest.py · event_driven.py · run.py
 strategies/  base.py · momentum.py · mean_reversion.py · pairs.py
 metrics/     performance.py · validation.py
 viz/         plots.py
 scripts/     yahoo_browser_fetch.js · make_charts.py
-tests/       64 tests
+tests/       83 tests
 notebooks/results/   generated charts and results table
 ```
 
@@ -265,6 +389,6 @@ notebooks/results/   generated charts and results table
 - [x] Phase 3 — Strategies
 - [x] Phase 4 — Metrics & evaluation
 - [x] Phase 5 — Visualization
-- [ ] Phase 6 — Event-driven backtester *(stretch)*
+- [x] Phase 6 — Event-driven backtester *(stretch)*
 - [ ] Phase 7 — C++ performance component *(stretch)*
 - [x] Phase 8 — Polish & ship
