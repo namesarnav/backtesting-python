@@ -16,6 +16,8 @@ notebooks/results/*.html
 .ipynb_checkpoints/
 *.egg-info/
 .DS_Store
+# C++ extension build artifacts (Phase 7). The .so is platform-specific
+# and rebuilt by `python setup.py build_ext --inplace`, so it stays out.
 build/
 *.so
 data/*.json
