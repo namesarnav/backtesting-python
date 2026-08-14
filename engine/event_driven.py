@@ -77,7 +77,22 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from engine.backtest import BPS_PER_UNIT, TRADE_TOLERANCE, VectorizedBacktester
+from engine.backtest import BPS_PER_UNIT, VectorizedBacktester
+
+# An order counts as a real fill when the dollars it moves exceed this
+# fraction of the portfolio. Deliberately *not* an absolute tolerance on the
+# share count, which the vectorized engine can get away with (it works in
+# weights, which are already scale-free) but this engine cannot: 1e-12 shares
+# of a $1 stock and of a $1000 stock are not the same event.
+#
+# It also has to survive float dust. Hold one asset at 100% and the target
+# share count is exactly what you already own, so every bar's delta is pure
+# rounding noise sitting near zero. Measured in shares that noise lands right
+# on an absolute 1e-12 threshold and tips either way depending on summation
+# order; measured as a fraction of equity it is ~1e-15, three orders of
+# magnitude clear of the line. That is the difference between a criterion
+# that is stable across implementations and one that is not.
+FILL_TOLERANCE = 1e-12
 
 
 @dataclass
@@ -101,7 +116,54 @@ class EventDrivenResult:
     equity: pd.Series = field(repr=False)  # portfolio value in dollars
 
 
-def _simulate(
+# The Phase 7 C++ port of the bar loop. Optional on purpose: a clone without
+# a compiler must still run the whole pipeline, so a missing extension is a
+# fallback, not an error. Build it with `python setup.py build_ext --inplace`.
+try:
+    from engine import _fastloop  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - depends on whether the ext is built
+    _fastloop = None
+
+VALID_BACKENDS = ("auto", "python", "cpp")
+
+
+def available_backends() -> tuple[str, ...]:
+    """Which loop implementations this install can actually run."""
+    return ("python", "cpp") if _fastloop is not None else ("python",)
+
+
+def _resolve_backend(backend: str) -> str:
+    """Turn a requested backend into the one that will actually be used.
+
+    `auto` prefers C++ and silently falls back; `cpp` is a demand, and fails
+    loudly if the extension is missing rather than quietly benchmarking the
+    Python loop and reporting it as the C++ number.
+    """
+    if backend not in VALID_BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; expected one of {VALID_BACKENDS}")
+    if backend == "cpp" and _fastloop is None:
+        raise RuntimeError(
+            "backend='cpp' requested but engine._fastloop is not built. "
+            "Run: python setup.py build_ext --inplace"
+        )
+    if backend == "auto":
+        return "cpp" if _fastloop is not None else "python"
+    return backend
+
+
+def _simulate(*args, backend: str = "auto", **kwargs) -> dict:
+    """Run the bar loop through the requested backend.
+
+    Both implementations take the same arguments and return the same dict of
+    arrays, which is what makes `tests/test_fastloop.py` able to assert they
+    agree. See `cpp/event_loop.cpp` for the C++ side.
+    """
+    if _resolve_backend(backend) == "cpp":
+        return _fastloop.simulate(*args, **kwargs)
+    return _simulate_python(*args, **kwargs)
+
+
+def _simulate_python(
     prices: np.ndarray,
     target_weights: np.ndarray,
     *,
@@ -161,8 +223,15 @@ def _simulate(
     cash_history = np.empty(n_bars)
     holdings = np.empty((n_bars, n_assets))
     weights_established = np.zeros((n_bars, n_assets))
-    # (bar index, asset index, shares, price, notional, cost) per fill.
-    fills: list[tuple[int, int, float, float, float, float]] = []
+    # Fills are accumulated as parallel columns rather than a list of
+    # tuples: it is the shape the C++ backend can hand back cheaply, and it
+    # keeps `_fill_log` identical for both.
+    fill_bar: list[int] = []
+    fill_asset: list[int] = []
+    fill_shares: list[float] = []
+    fill_price: list[float] = []
+    fill_notional: list[float] = []
+    fill_cost: list[float] = []
 
     previous_equity = float(initial_capital)
 
@@ -219,11 +288,13 @@ def _simulate(
         # `positions` -- which is what makes it line up with Phase 2.
         weights_established[t] = shares * price / equity_post
 
-        for i in np.nonzero(np.abs(delta) > TRADE_TOLERANCE)[0]:
-            fills.append(
-                (t, int(i), float(delta[i]), float(price[i]),
-                 float(delta[i] * price[i]), float(notional[i] * cost_rate))
-            )
+        for i in np.nonzero(notional > FILL_TOLERANCE * equity_pre)[0]:
+            fill_bar.append(t)
+            fill_asset.append(int(i))
+            fill_shares.append(float(delta[i]))
+            fill_price.append(float(price[i]))
+            fill_notional.append(float(delta[i] * price[i]))
+            fill_cost.append(float(notional[i] * cost_rate))
 
         previous_equity = equity_post
 
@@ -236,7 +307,12 @@ def _simulate(
         "cash": cash_history,
         "holdings": holdings,
         "weights_established": weights_established,
-        "fills": fills,
+        "fill_bar": np.asarray(fill_bar, dtype=np.int64),
+        "fill_asset": np.asarray(fill_asset, dtype=np.int64),
+        "fill_shares": np.asarray(fill_shares, dtype=float),
+        "fill_price": np.asarray(fill_price, dtype=float),
+        "fill_notional": np.asarray(fill_notional, dtype=float),
+        "fill_cost": np.asarray(fill_cost, dtype=float),
     }
 
 
@@ -261,6 +337,10 @@ class EventDrivenBacktester:
             Skip any order smaller than this fraction of equity. A no-trade
             band: cuts turnover and costs at the price of letting weights
             drift away from target.
+        backend : {'auto', 'python', 'cpp'}, default 'auto'
+            Which implementation of the bar loop to run. Results are the
+            same either way (see `tests/test_fastloop.py`); only the speed
+            differs. 'auto' uses C++ when the extension is built.
     """
 
     def __init__(self, config: dict | None = None):
@@ -279,6 +359,9 @@ class EventDrivenBacktester:
             raise ValueError(f"initial_capital must be positive (got {self.initial_capital})")
 
         self.fractional_shares = bool(config.get("fractional_shares", True))
+
+        self.backend = str(config.get("backend", "auto"))
+        _resolve_backend(self.backend)  # fail at construction, not mid-run
 
         self.rebalance_threshold = float(config.get("rebalance_threshold", 0.0))
         if self.rebalance_threshold < 0:
@@ -313,6 +396,7 @@ class EventDrivenBacktester:
             lag_days=self.lag_days,
             fractional_shares=self.fractional_shares,
             rebalance_threshold=self.rebalance_threshold,
+            backend=self.backend,
         )
 
         index, tickers = close.index, close.columns
@@ -333,7 +417,7 @@ class EventDrivenBacktester:
             positions=pd.DataFrame(
                 state["weights_established"], index=index, columns=tickers
             ).shift(1).fillna(0.0),
-            trades=self._fill_log(state["fills"], index, tickers),
+            trades=self._fill_log(state, index, tickers),
             gross_returns=_series("gross_returns", "gross_returns"),
             costs=_series("costs", "costs"),
             turnover=_series("turnover", "turnover"),
@@ -343,21 +427,30 @@ class EventDrivenBacktester:
         )
 
     @staticmethod
-    def _fill_log(fills, index: pd.Index, tickers: pd.Index) -> pd.DataFrame:
+    def _fill_log(state: dict, index: pd.Index, tickers: pd.Index) -> pd.DataFrame:
         """Long-format record of every fill.
 
         Richer than the vectorized engine's trade log, which can only report
         a change in weight: this knows the share count, the fill price, the
         dollars that moved and the commission paid on them.
+
+        Takes the raw column arrays from either backend, so the C++ loop and
+        the Python loop produce the same DataFrame through the same code.
         """
         columns = ["date", "ticker", "shares", "price", "notional", "cost"]
-        if not fills:
+        if state["fill_bar"].size == 0:
             return pd.DataFrame(columns=columns)
 
-        frame = pd.DataFrame(fills, columns=["_bar", "_asset", *columns[2:]])
-        frame.insert(0, "date", index[frame.pop("_bar").to_numpy()])
-        frame.insert(1, "ticker", tickers[frame.pop("_asset").to_numpy()])
-        return frame[columns]
+        return pd.DataFrame(
+            {
+                "date": index[state["fill_bar"]],
+                "ticker": tickers[state["fill_asset"]],
+                "shares": state["fill_shares"],
+                "price": state["fill_price"],
+                "notional": state["fill_notional"],
+                "cost": state["fill_cost"],
+            }
+        )
 
 
 def reconcile(
