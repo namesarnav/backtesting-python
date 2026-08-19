@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from engine.backtest import VectorizedBacktester  # noqa: E402
-from engine.event_driven import reconcile  # noqa: E402
+from engine.event_driven import available_backends, reconcile  # noqa: E402
 from engine.data_loader import DataLoader  # noqa: E402
 from metrics.performance import summarize  # noqa: E402
 from metrics.validation import compare_to_benchmark, walk_forward  # noqa: E402
@@ -162,6 +162,8 @@ def main() -> None:
           f"{backtest_config['slippage_bps']}bp slippage, "
           f"positions lagged {backtest_config['lag_days']} day(s)")
     print(f"Allocation : {backtest_config['allocation']}")
+    backends = available_backends()
+    print(f"Bar loop   : {'cpp (C++ extension)' if 'cpp' in backends else 'python (extension not built)'}")
 
     rows, returns_by_name = [], {}
     for name in available_strategies():
