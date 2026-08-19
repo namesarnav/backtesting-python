@@ -1,0 +1,36 @@
+============================================================================
+PHASE 7 BENCHMARK: event-driven bar loop, Python vs C++
+============================================================================
+
+CORRECTNESS  (both backends, real panel)
+
+strategy           max |return diff|   final equity diff     fills
+------------------------------------------------------------------
+mean_reversion              7.77e-15            2.27e-15    41,527
+momentum                    4.44e-16            0.00e+00     4,960
+pairs                       4.44e-16            1.63e-15       956
+
+Worst disagreement: 7.77e-15 -- float-ordering noise, not a difference in result.
+
+WALL CLOCK  (real panel: 1,258 bars x 40 tickers)
+
+strategy              python       cpp   speedup     (full run() end to end)
+----------------------------------------------------------------------------
+mean_reversion       25.06ms    0.53ms     47.2x          27.5ms ->    2.7ms  (10.0x)
+momentum              9.51ms    0.34ms     27.6x          11.2ms ->    1.7ms  (6.7x)
+pairs                 7.80ms    0.24ms     32.3x           9.7ms ->    1.9ms  (5.2x)
+
+SCALING  (1,258 bars, varying width -- synthetic)
+
+  assets      python       cpp   speedup   python us/bar   cpp us/bar
+---------------------------------------------------------------------
+       5      9.85ms    0.06ms    168.2x            7.83         0.05
+      20     17.86ms    0.29ms     61.8x           14.20         0.23
+      40     28.25ms    0.70ms     40.4x           22.46         0.56
+     100     61.28ms    1.87ms     32.8x           48.72         1.48
+     500    311.68ms   14.57ms     21.4x          247.76        11.58
+
+The speedup shrinks as the book widens: with 500 tickers the arrays are
+large enough that NumPy's arithmetic dominates its own call overhead, so
+there is less interpreter tax left to remove. The gain is not 'C++ beats
+NumPy at maths' -- it is 'C++ does not pay a dispatch cost 15 times a bar'.
