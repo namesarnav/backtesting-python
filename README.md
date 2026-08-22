@@ -297,6 +297,116 @@ execution, quietly and in the optimistic direction.
 
 ---
 
+## The C++ component
+
+The event-driven bar loop is ported to C++ in `cpp/event_loop.cpp` and bound
+with `pybind11`. It is a line-for-line translation of `_simulate_python` —
+same variable names, same order of operations — because the point is to
+measure the language, not to compare two different algorithms.
+
+The extension is **optional**. Without a compiler the engine falls back to
+the Python loop and every number in this repo is unchanged; only the runtime
+differs. `python -m engine.run` prints which backend it used.
+
+```bash
+python setup.py build_ext --inplace   # builds engine/_fastloop.*.so
+python scripts/benchmark_cpp.py       # correctness, then wall clock
+```
+
+### Choosing what to port
+
+The tempting target is the vectorized engine's returns aggregation. Porting
+it would have been a waste: it is already NumPy, which is already compiled C
+with SIMD, so the honest measurement would have been about 1x.
+
+The event-driven loop is the opposite case. It is irreducibly serial — bar
+*t+1*'s equity depends on bar *t*'s fills — and in Python each bar pays for
+roughly fifteen separate NumPy calls on 40-element arrays. At that size the
+per-call cost (allocate a temporary, check dtypes, refcount, return) dwarfs
+the ~40 multiply-adds of real arithmetic.
+
+So Phase 6 was not decoration in front of Phase 7. It is what made a real
+speedup possible to measure at all.
+
+### Results
+
+Correctness first — a speedup from code that computes something else is not a
+speedup. Across all three strategies on the real panel, the largest
+disagreement in daily returns is **7.8e-15**, with identical fill counts.
+That is float-ordering noise: NumPy reduces pairwise, the C++ loop
+accumulates in order, so they differ in the last bit.
+
+```
+WALL CLOCK  (real panel: 1,258 bars x 40 tickers)
+
+strategy              python       cpp   speedup     (full run() end to end)
+----------------------------------------------------------------------------
+mean_reversion       25.06ms    0.53ms     47.2x          27.5ms ->    2.7ms  (10.0x)
+momentum              9.51ms    0.34ms     27.6x          11.2ms ->    1.7ms  (6.7x)
+pairs                 7.80ms    0.24ms     32.3x           9.7ms ->    1.9ms  (5.2x)
+```
+
+Two numbers, on purpose. The loop is what was ported, so **~28–47x** measures
+the port. But a user calls `run()`, which also builds a dozen pandas objects
+around the loop — constant work C++ never touches — so the end-to-end gain is
+**5–10x**. Quoting only the first would overstate what anyone experiences.
+(Run-to-run variance across strategies is real; `scripts/benchmark_cpp.py`
+regenerates the table.)
+
+### Why the speedup is what it is
+
+Holding bars fixed and varying only the width of the book shows the
+mechanism directly:
+
+```
+SCALING  (1,258 bars, varying width -- synthetic)
+
+  assets      python       cpp   speedup   python us/bar   cpp us/bar
+---------------------------------------------------------------------
+       5      9.85ms    0.06ms    168.2x            7.83         0.05
+      20     17.86ms    0.29ms     61.8x           14.20         0.23
+      40     28.25ms    0.70ms     40.4x           22.46         0.56
+     100     61.28ms    1.87ms     32.8x           48.72         1.48
+     500    311.68ms   14.57ms     21.4x          247.76        11.58
+```
+
+The Python loop pays the same fixed dispatch cost per NumPy call whether the
+arrays hold 5 elements or 500, so the narrower the book, the more of the
+runtime is pure interpreter tax — and the more there is to remove. At 500
+tickers the arrays are finally large enough that NumPy's own arithmetic
+dominates, and the gap narrows to 21x.
+
+The claim is therefore not "C++ beats NumPy at arithmetic." It is "C++ does
+not pay a dispatch tax fifteen times per bar." That distinction is the whole
+result.
+
+### What the port cost
+
+Two things had to change, and both were improvements:
+
+**The fill criterion.** The original loop counted an order as real when the
+share delta exceeded an absolute `1e-12`. That is not scale-free — 1e-12
+shares of a $1 stock and of a $1000 stock are not the same event — and it
+broke the port. Hold one asset at 100% and the target share count is exactly
+what you already own, so every bar's delta is float dust sitting right on the
+threshold, tipping either way depending on summation order. The two backends
+disagreed on the fill count by one. Measuring the order as a *fraction of
+equity* puts that dust at ~1e-15, three orders of magnitude clear of the
+line, and makes the criterion stable across implementations.
+
+**Tolerances that respect cancellation.** Cash is a residual: equity minus
+everything held. In a long/short book those are two ~$2M numbers that nearly
+cancel to a balance of a few dollars, so it keeps absolute precision at the
+scale of the inputs while its *relative* precision is destroyed. The tests
+compare money in dollars and ratios relatively; one tolerance for both would
+either fail on cash or wave through a real divergence in the returns.
+
+The loop also releases the GIL, so two backtests can run on two threads.
+`test_cpp_backend_releases_the_gil` asserts that by timing it — otherwise
+removing the release would break nothing any other test could see.
+
+---
+
 ## Running it
 
 ### Docker (reproduces everything)
@@ -319,9 +429,20 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python -m engine.run          # full pipeline: table + charts
-pytest -q                     # 64 tests
+pytest -q                     # 101 tests
 python scripts/make_charts.py # charts only
 ```
+
+Optionally build the C++ bar loop. Everything runs without it — the engine
+falls back to the Python loop and the results are identical — but it makes
+the event-driven engine 5–10x faster end to end:
+
+```bash
+python setup.py build_ext --inplace   # needs a C++17 compiler
+python scripts/benchmark_cpp.py       # verifies equivalence, then times it
+```
+
+The Docker image builds it, so `docker run` always takes the fast path.
 
 ### Refreshing the price data
 
@@ -376,8 +497,9 @@ engine/      data_loader.py · backtest.py · event_driven.py · run.py
 strategies/  base.py · momentum.py · mean_reversion.py · pairs.py
 metrics/     performance.py · validation.py
 viz/         plots.py
-scripts/     yahoo_browser_fetch.js · make_charts.py
-tests/       83 tests
+cpp/         event_loop.cpp (optional pybind11 extension)
+scripts/     yahoo_browser_fetch.js · make_charts.py · benchmark_cpp.py
+tests/       101 tests
 notebooks/results/   generated charts and results table
 ```
 
@@ -390,5 +512,5 @@ notebooks/results/   generated charts and results table
 - [x] Phase 4 — Metrics & evaluation
 - [x] Phase 5 — Visualization
 - [x] Phase 6 — Event-driven backtester *(stretch)*
-- [ ] Phase 7 — C++ performance component *(stretch)*
+- [x] Phase 7 — C++ performance component *(stretch)*
 - [x] Phase 8 — Polish & ship
