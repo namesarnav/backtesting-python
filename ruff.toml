@@ -1,0 +1,21 @@
+# Lint/format config. Deliberately small: the point is a consistent style and
+# a few real-bug checks, not a wall of stylistic opinions.
+
+line-length = 100
+target-version = "py311"
+
+exclude = ["build", ".venv", "notebooks/results"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes: undefined names, unused imports, real bugs
+    "I",    # import ordering
+    "UP",   # pyupgrade: don't write 3.6-era Python
+    "B",    # bugbear: mutable defaults, loop-variable capture, ...
+    "SIM",  # obvious simplifications
+    "NPY",  # numpy-specific correctness (legacy random, ptp, ...)
+]
+
+[lint.isort]
+known-first-party = ["engine", "metrics", "strategies", "viz"]

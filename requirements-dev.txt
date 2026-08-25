@@ -1,0 +1,2 @@
+# Tooling that CI and local development use but the Docker image does not.
+ruff==0.16.6
