@@ -106,7 +106,9 @@ STRATEGY_CASES = {
         15,
     ),
     "pairs": (
-        lambda: PairsStrategy(lookback=60, entry_z=1.0, exit_z=0.25, pvalue_threshold=0.99, n_candidates=10),
+        lambda: PairsStrategy(
+            lookback=60, entry_z=1.0, exit_z=0.25, pvalue_threshold=0.99, n_candidates=10
+        ),
         _cointegrated_prices,
         70,
     ),
@@ -207,7 +209,8 @@ def test_momentum_longs_the_strongest_and_shorts_the_weakest():
     final = signals.iloc[-1]
     assert final["WINNER"] == 1.0, "did not go long the best performer"
     assert final["LOSER"] == -1.0, "did not short the worst performer"
-    assert final["MILD_UP"] == 0.0 and final["MILD_DOWN"] == 0.0, "middle of the pack should be flat"
+    assert final["MILD_UP"] == 0.0 and final["MILD_DOWN"] == 0.0, \
+        "middle of the pack should be flat"
 
 
 def test_momentum_long_only_never_shorts():

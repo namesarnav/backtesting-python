@@ -13,7 +13,7 @@ It exists solely to compile one translation unit; dependencies live in
 requirements.txt, which is what Docker and CI install.
 """
 
-from setuptools import Extension, setup
+from setuptools import setup
 
 try:
     from pybind11.setup_helpers import Pybind11Extension, build_ext

@@ -128,7 +128,8 @@ class VectorizedBacktester:
             extra = sorted(set(signals.columns) - set(close.columns))
             raise ValueError(
                 "close and signals must share identical tickers in the same order; "
-                f"missing from signals: {missing or 'none'}, unexpected in signals: {extra or 'none'}"
+                f"missing from signals: {missing or 'none'}, "
+                f"unexpected in signals: {extra or 'none'}"
             )
 
         if close.empty:

@@ -35,6 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")  # No display in Docker/CI -- render straight to file.
 
 import matplotlib.pyplot as plt
@@ -247,7 +248,8 @@ def plot_rolling_sharpe(
 
     fig.suptitle(f"Rolling {window}-day Sharpe ratio", x=0.02, y=0.985, ha="left",
                  fontsize=13, color=INK, weight="medium")
-    fig.text(0.02, 0.93, "above zero means the strategy was being paid for its risk over that window",
+    fig.text(0.02, 0.93,
+             "above zero means the strategy was being paid for its risk over that window",
              ha="left", fontsize=9.5, color=INK_MUTED)
 
     return _save(fig, Path(output_dir) / f"rolling_sharpe_{window}d.png")

@@ -106,14 +106,16 @@ def check_correctness(close, panel, config) -> list[str]:
         worst = max(worst, return_diff)
         lines.append(f"{name:<16}{return_diff:>20.2e}{equity_diff:>20.2e}{len(py.trades):>10,}")
 
-    lines += ["", f"Worst disagreement: {worst:.2e} -- float-ordering noise, not a difference in result."]
+    lines += ["", f"Worst disagreement: {worst:.2e} -- float-ordering noise, "
+              "not a difference in result."]
     return lines
 
 
 def benchmark_real(close, panel, config) -> list[str]:
     """Time the actual workload this repo runs."""
     lines = ["", "WALL CLOCK  (real panel: 1,258 bars x 40 tickers)", ""]
-    lines.append(f"{'strategy':<16}{'python':>12}{'cpp':>10}{'speedup':>10}{'  (full run() end to end)':>28}")
+    lines.append(f"{'strategy':<16}{'python':>12}{'cpp':>10}{'speedup':>10}"
+                 f"{'  (full run() end to end)':>28}")
     lines.append("-" * 76)
 
     for name in available_strategies():
@@ -152,7 +154,8 @@ def benchmark_scaling() -> list[str]:
     pure interpreter tax and the bigger the win from removing it.
     """
     lines = ["", "SCALING  (1,258 bars, varying width -- synthetic)", ""]
-    lines.append(f"{'assets':>8}{'python':>12}{'cpp':>10}{'speedup':>10}{'python us/bar':>16}{'cpp us/bar':>13}")
+    lines.append(f"{'assets':>8}{'python':>12}{'cpp':>10}{'speedup':>10}"
+                 f"{'python us/bar':>16}{'cpp us/bar':>13}")
     lines.append("-" * 69)
 
     for n_assets in (5, 20, 40, 100, 500):

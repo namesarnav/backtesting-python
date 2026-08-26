@@ -77,7 +77,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from engine.backtest import BPS_PER_UNIT, VectorizedBacktester
+from engine.backtest import VectorizedBacktester
 
 # An order counts as a real fill when the dollars it moves exceed this
 # fraction of the portfolio. Deliberately *not* an absolute tolerance on the

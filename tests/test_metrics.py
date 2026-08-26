@@ -23,7 +23,7 @@ from metrics.performance import (
     total_return,
     win_rate,
 )
-from metrics.validation import Fold, compare_to_benchmark, make_folds, walk_forward
+from metrics.validation import compare_to_benchmark, make_folds, walk_forward
 
 SQRT_252 = np.sqrt(252)
 
@@ -151,7 +151,7 @@ def test_folds_tile_the_test_windows_without_gaps_or_overlap():
     folds = make_folds(n_rows=1258, train_window=504, test_window=126, step=126)
 
     assert len(folds) == 5
-    for earlier, later in zip(folds, folds[1:]):
+    for earlier, later in zip(folds, folds[1:], strict=False):
         assert later.test_start == earlier.test_end, "test windows are not contiguous"
     assert all(f.test_end - f.test_start == 126 for f in folds)
     assert all(f.test_start - f.train_start == 504 for f in folds)

@@ -10,17 +10,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))  # so `engine`/`strategies`/`viz` import when
                                     # this is run as a script rather than -m
 
-import yaml
+import yaml  # noqa: E402
 
-from engine.backtest import VectorizedBacktester
-from engine.data_loader import DataLoader
-from strategies import available_strategies, load_strategy
-from viz.plots import generate_all
+from engine.backtest import VectorizedBacktester  # noqa: E402
+from engine.data_loader import DataLoader  # noqa: E402
+from strategies import available_strategies, load_strategy  # noqa: E402
+from viz.plots import generate_all  # noqa: E402
 
 
 def main() -> None:
-    backtest_config = yaml.safe_load(open(REPO_ROOT / "configs" / "backtest.yaml"))
-    universe = yaml.safe_load(open(REPO_ROOT / "configs" / "universe.yaml"))
+    backtest_config = yaml.safe_load((REPO_ROOT / "configs" / "backtest.yaml").read_text())
+    universe = yaml.safe_load((REPO_ROOT / "configs" / "universe.yaml").read_text())
     benchmark_ticker = universe["benchmark"]
 
     panel = DataLoader().load_panel()

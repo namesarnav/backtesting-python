@@ -26,8 +26,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from engine.backtest import VectorizedBacktester  # noqa: E402
-from engine.event_driven import available_backends, reconcile  # noqa: E402
 from engine.data_loader import DataLoader  # noqa: E402
+from engine.event_driven import available_backends, reconcile  # noqa: E402
 from metrics.performance import summarize  # noqa: E402
 from metrics.validation import compare_to_benchmark, walk_forward  # noqa: E402
 from strategies import available_strategies, load_strategy  # noqa: E402
@@ -143,7 +143,7 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 - CLI: explain rather than traceback
         print(f"\nCould not load price data: {exc}", file=sys.stderr)
         print(NO_DATA_HELP, file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
     close = panel["close"]
     benchmark_returns = (
@@ -163,7 +163,8 @@ def main() -> None:
           f"positions lagged {backtest_config['lag_days']} day(s)")
     print(f"Allocation : {backtest_config['allocation']}")
     backends = available_backends()
-    print(f"Bar loop   : {'cpp (C++ extension)' if 'cpp' in backends else 'python (extension not built)'}")
+    loop = "cpp (C++ extension)" if "cpp" in backends else "python (extension not built)"
+    print(f"Bar loop   : {loop}")
 
     rows, returns_by_name = [], {}
     for name in available_strategies():
@@ -222,7 +223,7 @@ def main() -> None:
     print(f"  {(RESULTS_DIR / 'results_table.txt').relative_to(REPO_ROOT)}")
 
     reconciliation = _format_reconciliation(panel, close, backtest_config)
-    print(f"\nENGINE RECONCILIATION  (Phase 6: vectorized vs event-driven)\n")
+    print("\nENGINE RECONCILIATION  (Phase 6: vectorized vs event-driven)\n")
     print(reconciliation)
     (RESULTS_DIR / "engine_reconciliation.txt").write_text(reconciliation + "\n")
     print(f"\n  {(RESULTS_DIR / 'engine_reconciliation.txt').relative_to(REPO_ROOT)}")

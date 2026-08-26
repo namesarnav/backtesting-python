@@ -109,7 +109,10 @@ def _param_combinations(grid: dict[str, list] | None) -> list[dict]:
     if not grid:
         return [{}]
     keys = list(grid)
-    return [dict(zip(keys, values)) for values in itertools.product(*(grid[k] for k in keys))]
+    return [
+        dict(zip(keys, values, strict=True))
+        for values in itertools.product(*(grid[k] for k in keys))
+    ]
 
 
 def _run(panel: pd.DataFrame, strategy, backtest_config: dict):

@@ -55,7 +55,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -137,8 +137,8 @@ class DataLoader:
     # -- fetching ---------------------------------------------------------
 
     def _fetch_ticker_json(self, ticker: str, retries: int = 3) -> dict:
-        period1 = int(datetime.strptime(self.start, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
-        period2 = int(datetime.strptime(self.end, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+        period1 = int(datetime.strptime(self.start, "%Y-%m-%d").replace(tzinfo=UTC).timestamp())
+        period2 = int(datetime.strptime(self.end, "%Y-%m-%d").replace(tzinfo=UTC).timestamp())
         params = {
             "period1": period1,
             "period2": period2,
@@ -311,7 +311,7 @@ def main() -> None:
                 "Fix: connect to Wi-Fi or wired broadband and run this again.",
                 file=sys.stderr,
             )
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
     elapsed = time.perf_counter() - started
     close = panel["close"]
