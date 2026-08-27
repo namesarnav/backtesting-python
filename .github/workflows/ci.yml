@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      # The engine runs pure Python without this; building it here means the
+      # suite exercises the C++ bar loop and the two backends are compared
+      # against each other on every push (tests/test_fastloop.py).
+      - name: Build the C++ extension
+        run: python setup.py build_ext --inplace
+
+      - name: Test
+        run: pytest -q
+
+      # The committed price cache means this needs no network: a fresh clone
+      # must reproduce the results table and the charts.
+      - name: Run the pipeline end to end
+        run: python -m engine.run
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Phase 8's checkpoint: `docker build` then `docker run` reproduces the
+      # results with no arguments and no network.
+      - name: Build image
+        run: docker build -t backtest-engine .
+
+      - name: Run image
+        run: docker run --rm backtest-engine

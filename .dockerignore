@@ -8,3 +8,7 @@ data/*.json
 notebooks/results/*.png
 build/
 *.so
+.github/
+requirements-dev.txt
+ruff.toml
+LICENSE
