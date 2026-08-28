@@ -1,5 +1,7 @@
 # Vectorized Portfolio Backtesting Engine
 
+[![CI](https://github.com/namesarnav/backtesting-python/actions/workflows/ci.yml/badge.svg)](https://github.com/namesarnav/backtesting-python/actions/workflows/ci.yml)
+
 A daily-frequency backtesting engine for multi-asset equity strategies, built
 to demonstrate the things that actually matter in quantitative development:
 **correct vectorized computation, explicit handling of look-ahead bias,
@@ -431,7 +433,14 @@ pip install -r requirements.txt
 python -m engine.run          # full pipeline: table + charts
 pytest -q                     # 101 tests
 python scripts/make_charts.py # charts only
+
+pip install -r requirements-dev.txt
+ruff check .                  # what CI lints with
 ```
+
+CI runs the same commands on Python 3.11/3.12/3.13, builds the C++ extension
+so the backend-equivalence tests actually run, and separately builds and runs
+the Docker image.
 
 Optionally build the C++ bar loop. Everything runs without it — the engine
 falls back to the Python loop and the results are identical — but it makes
@@ -500,6 +509,7 @@ viz/         plots.py
 cpp/         event_loop.cpp (optional pybind11 extension)
 scripts/     yahoo_browser_fetch.js · make_charts.py · benchmark_cpp.py
 tests/       101 tests
+.github/     CI: lint, tests on 3.11-3.13, Docker build
 notebooks/results/   generated charts and results table
 ```
 
@@ -514,3 +524,9 @@ notebooks/results/   generated charts and results table
 - [x] Phase 6 — Event-driven backtester *(stretch)*
 - [x] Phase 7 — C++ performance component *(stretch)*
 - [x] Phase 8 — Polish & ship
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
