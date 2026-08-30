@@ -15,6 +15,9 @@ The look-ahead tests at the bottom are the explicit ones the spec requires.
 `toy_lookahead_panel()` builds the data from guide §4 that they check against.
 """
 
+import ast
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -297,3 +300,35 @@ def test_lag_of_zero_is_rejected():
 
     with pytest.raises(ValueError, match="lag_days"):
         _backtester({**DEFAULT_CONFIG, "lag_days": 0})
+
+
+# ---------------------------------------------------------------------------
+# The non-functional requirement, made testable
+# ---------------------------------------------------------------------------
+
+
+def test_engine_contains_no_python_level_iteration():
+    """"Vectorized" is a claim about the code, so assert it against the code.
+
+    The engine must express the whole backtest as whole-table operations --
+    no `for`/`while` over dates or tickers, and no comprehension standing in
+    for one. Every metric this repo reports would be unchanged by a slow
+    Python loop, so nothing else in the suite would notice if one appeared;
+    this parses the module and looks.
+    """
+    source = Path(__file__).resolve().parent.parent / "engine" / "backtest.py"
+    tree = ast.parse(source.read_text())
+
+    offenders = sorted(
+        f"{type(node).__name__} on line {node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.For, ast.While, ast.AsyncFor))
+    ) + sorted(
+        f"comprehension on line {node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))
+    )
+
+    assert not offenders, (
+        "engine/backtest.py must stay loop-free -- found: " + ", ".join(offenders)
+    )
