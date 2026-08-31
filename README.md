@@ -19,6 +19,10 @@ docker build -t backtest-engine . && docker run --rm backtest-engine
 That single command reproduces every number and chart below. No API keys, no
 network, no manual steps — the price cache is committed.
 
+**[BACKTEST.md](BACKTEST.md)** is the long-form writeup: the decisions behind
+each phase, the three bugs that nearly got through, and what building the
+engine twice exposed about the first one.
+
 ---
 
 ## Results
@@ -431,7 +435,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python -m engine.run          # full pipeline: table + charts
-pytest -q                     # 101 tests
+pytest -q                     # 102 tests
 python scripts/make_charts.py # charts only
 
 pip install -r requirements-dev.txt
@@ -508,7 +512,7 @@ metrics/     performance.py · validation.py
 viz/         plots.py
 cpp/         event_loop.cpp (optional pybind11 extension)
 scripts/     yahoo_browser_fetch.js · make_charts.py · benchmark_cpp.py
-tests/       101 tests
+tests/       102 tests
 .github/     CI: lint, tests on 3.11-3.13, Docker build
 notebooks/results/   generated charts and results table
 ```
