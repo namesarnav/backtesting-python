@@ -1,55 +1,1052 @@
-# Universe: 40 liquid US equities across sectors.
-# NOTE: these are currently-listed tickers — this universe is NOT
-# survivorship-bias-free (see README "Limitations").
+# Universe: the S&P 500 constituents, as a cross-sectional research
+# universe. Tickers are in Yahoo format (BRK.B -> BRK-B, BF.B -> BF-B).
+#
+# Every ticker is QUOTED, and must stay that way. YAML 1.1 resolves a
+# bare ON to the boolean true, which silently turns ON Semiconductor
+# into a request for a ticker named "true". OFF/YES/NO/Y/N are the same
+# trap for any future constituent.
+#
+# SURVIVORSHIP / LOOK-AHEAD WARNING -- read before trusting any result
+# computed on this universe. This is the index membership as of TODAY,
+# not as of the backtest start date, and the two differ badly:
+#
+#   * 118 of these 503 names (23%) joined the index on or
+#     after 2019-01-01, so holding them from 2019 is a bet nobody could
+#     have placed -- you are buying the companies that were about to be
+#     promoted into the index.
+#   * every company deleted from the index between 2019 and 2023 --
+#     acquired, bankrupt, or simply shrunk out -- is absent entirely.
+#
+# Both errors push results the same way: up. A point-in-time membership
+# file is the only real fix; until then, treat the headline numbers on
+# this universe as an upper bound, and compare strategies to each other
+# rather than to an absolute bar.
+
 tickers:
-  # Technology
-  - AAPL
-  - MSFT
-  - GOOGL
-  - NVDA
-  - META
-  - CRM
-  - ADBE
-  - ORCL
-  # Financials
-  - JPM
-  - BAC
-  - GS
-  - MS
-  - AXP
-  - BLK
-  # Industrials
-  - HON
-  - CAT
-  - UPS
-  - BA
-  - GE
-  - MMM
-  # Healthcare
-  - UNH
-  - JNJ
-  - PFE
-  - ABBV
-  - MRK
-  - TMO
-  # Energy
-  - XOM
-  - CVX
-  - COP
-  - SLB
-  # Consumer
-  - AMZN
-  - HD
-  - MCD
-  - NKE
-  - PG
-  - KO
-  - PEP
-  - WMT
-  - DIS
-  - COST
+  # Communication Services (24)
+  - "APP"
+  - "CHTR"
+  - "CMCSA"
+  - "DIS"
+  - "ECHO"
+  - "FOX"
+  - "FOXA"
+  - "GOOG"
+  - "GOOGL"
+  - "LYV"
+  - "META"
+  - "NFLX"
+  - "NWS"
+  - "NWSA"
+  - "OMC"
+  - "PSKY"
+  - "RDDT"
+  - "T"
+  - "TKO"
+  - "TMUS"
+  - "TTD"
+  - "TTWO"
+  - "VZ"
+  - "WBD"
+  # Consumer Discretionary (47)
+  - "ABNB"
+  - "AMZN"
+  - "APTV"
+  - "AZO"
+  - "BBY"
+  - "BKNG"
+  - "CCL"
+  - "CMG"
+  - "CVNA"
+  - "DASH"
+  - "DECK"
+  - "DHI"
+  - "DPZ"
+  - "DRI"
+  - "EBAY"
+  - "EXPE"
+  - "F"
+  - "GM"
+  - "GPC"
+  - "GRMN"
+  - "HAS"
+  - "HD"
+  - "HLT"
+  - "LEN"
+  - "LOW"
+  - "LULU"
+  - "LVS"
+  - "MAR"
+  - "MCD"
+  - "MGM"
+  - "NCLH"
+  - "NKE"
+  - "NVR"
+  - "ORLY"
+  - "PHM"
+  - "RCL"
+  - "RL"
+  - "ROST"
+  - "SBUX"
+  - "TJX"
+  - "TPR"
+  - "TSCO"
+  - "TSLA"
+  - "ULTA"
+  - "WSM"
+  - "WYNN"
+  - "YUM"
+  # Consumer Staples (34)
+  - "ADM"
+  - "BF-B"
+  - "BG"
+  - "CASY"
+  - "CHD"
+  - "CL"
+  - "CLX"
+  - "COST"
+  - "DG"
+  - "DLTR"
+  - "EL"
+  - "GIS"
+  - "HRL"
+  - "HSY"
+  - "KDP"
+  - "KHC"
+  - "KMB"
+  - "KO"
+  - "KR"
+  - "KVUE"
+  - "MDLZ"
+  - "MKC"
+  - "MNST"
+  - "MO"
+  - "PEP"
+  - "PG"
+  - "PM"
+  - "SJM"
+  - "STZ"
+  - "SYY"
+  - "TAP"
+  - "TGT"
+  - "TSN"
+  - "WMT"
+  # Energy (21)
+  - "APA"
+  - "BKR"
+  - "COP"
+  - "CVX"
+  - "DVN"
+  - "EOG"
+  - "EQT"
+  - "EXE"
+  - "FANG"
+  - "HAL"
+  - "KMI"
+  - "MPC"
+  - "OKE"
+  - "OXY"
+  - "PSX"
+  - "SLB"
+  - "TPL"
+  - "TRGP"
+  - "VLO"
+  - "WMB"
+  - "XOM"
+  # Financials (76)
+  - "ACGL"
+  - "AFL"
+  - "AIG"
+  - "AIZ"
+  - "AJG"
+  - "ALL"
+  - "AMP"
+  - "AON"
+  - "APO"
+  - "ARES"
+  - "AXP"
+  - "BAC"
+  - "BEN"
+  - "BLK"
+  - "BNY"
+  - "BRK-B"
+  - "BRO"
+  - "BX"
+  - "C"
+  - "CB"
+  - "CBOE"
+  - "CFG"
+  - "CINF"
+  - "CME"
+  - "COF"
+  - "COIN"
+  - "CPAY"
+  - "EG"
+  - "ERIE"
+  - "FDS"
+  - "FIS"
+  - "FISV"
+  - "FITB"
+  - "GL"
+  - "GPN"
+  - "GS"
+  - "HBAN"
+  - "HIG"
+  - "HOOD"
+  - "IBKR"
+  - "ICE"
+  - "IVZ"
+  - "JKHY"
+  - "JPM"
+  - "KEY"
+  - "KKR"
+  - "L"
+  - "MA"
+  - "MCO"
+  - "MET"
+  - "MRSH"
+  - "MS"
+  - "MSCI"
+  - "MTB"
+  - "NDAQ"
+  - "NTRS"
+  - "PFG"
+  - "PGR"
+  - "PNC"
+  - "PRU"
+  - "PYPL"
+  - "RF"
+  - "RJF"
+  - "SCHW"
+  - "SPGI"
+  - "STT"
+  - "SYF"
+  - "TFC"
+  - "TROW"
+  - "TRV"
+  - "USB"
+  - "V"
+  - "WFC"
+  - "WRB"
+  - "WTW"
+  - "XYZ"
+  # Health Care (59)
+  - "A"
+  - "ABBV"
+  - "ABT"
+  - "ALGN"
+  - "AMGN"
+  - "BAX"
+  - "BDX"
+  - "BIIB"
+  - "BMY"
+  - "BSX"
+  - "CAH"
+  - "CI"
+  - "CNC"
+  - "COO"
+  - "COR"
+  - "CRL"
+  - "CVS"
+  - "DGX"
+  - "DHR"
+  - "DVA"
+  - "DXCM"
+  - "ELV"
+  - "EW"
+  - "GEHC"
+  - "GILD"
+  - "HCA"
+  - "HSIC"
+  - "HUM"
+  - "IDXX"
+  - "INCY"
+  - "IQV"
+  - "ISRG"
+  - "JNJ"
+  - "LH"
+  - "LLY"
+  - "MCK"
+  - "MDT"
+  - "MRK"
+  - "MRNA"
+  - "MTD"
+  - "PFE"
+  - "PODD"
+  - "REGN"
+  - "RMD"
+  - "RVTY"
+  - "SOLV"
+  - "STE"
+  - "SYK"
+  - "TECH"
+  - "TMO"
+  - "UHS"
+  - "UNH"
+  - "VEEV"
+  - "VRTX"
+  - "VTRS"
+  - "WAT"
+  - "WST"
+  - "ZBH"
+  - "ZTS"
+  # Industrials (83)
+  - "ADP"
+  - "ALLE"
+  - "AME"
+  - "AOS"
+  - "AXON"
+  - "BA"
+  - "BLDR"
+  - "BR"
+  - "CARR"
+  - "CAT"
+  - "CHRW"
+  - "CMI"
+  - "CPRT"
+  - "CSX"
+  - "CTAS"
+  - "DAL"
+  - "DD"
+  - "DE"
+  - "DOV"
+  - "EFX"
+  - "EME"
+  - "EMR"
+  - "ETN"
+  - "EXPD"
+  - "FAST"
+  - "FDX"
+  - "FDXF"
+  - "FERG"
+  - "FIX"
+  - "FTV"
+  - "GD"
+  - "GE"
+  - "GEV"
+  - "GNRC"
+  - "GWW"
+  - "HII"
+  - "HON"
+  - "HONA"
+  - "HUBB"
+  - "HWM"
+  - "IEX"
+  - "IR"
+  - "ITW"
+  - "J"
+  - "JBHT"
+  - "JCI"
+  - "LDOS"
+  - "LHX"
+  - "LII"
+  - "LMT"
+  - "LUV"
+  - "MAS"
+  - "MMM"
+  - "NDSN"
+  - "NOC"
+  - "NSC"
+  - "ODFL"
+  - "OTIS"
+  - "PAYX"
+  - "PCAR"
+  - "PH"
+  - "PNR"
+  - "PWR"
+  - "ROK"
+  - "ROL"
+  - "RSG"
+  - "RTX"
+  - "SNA"
+  - "SWK"
+  - "TDG"
+  - "TT"
+  - "TXT"
+  - "UAL"
+  - "UBER"
+  - "UNP"
+  - "UPS"
+  - "URI"
+  - "VLTO"
+  - "VRSK"
+  - "VRT"
+  - "WAB"
+  - "WM"
+  - "XYL"
+  # Information Technology (73)
+  - "AAPL"
+  - "ACN"
+  - "ADBE"
+  - "ADI"
+  - "ADSK"
+  - "AKAM"
+  - "AMAT"
+  - "AMD"
+  - "ANET"
+  - "APH"
+  - "AVGO"
+  - "CDNS"
+  - "CDW"
+  - "CIEN"
+  - "COHR"
+  - "CRM"
+  - "CRWD"
+  - "CSCO"
+  - "CTSH"
+  - "DDOG"
+  - "DELL"
+  - "FFIV"
+  - "FICO"
+  - "FLEX"
+  - "FSLR"
+  - "FTNT"
+  - "GDDY"
+  - "GEN"
+  - "GLW"
+  - "HPE"
+  - "HPQ"
+  - "IBM"
+  - "INTC"
+  - "INTU"
+  - "IT"
+  - "JBL"
+  - "KEYS"
+  - "KLAC"
+  - "LITE"
+  - "LRCX"
+  - "MCHP"
+  - "MPWR"
+  - "MRVL"
+  - "MSFT"
+  - "MSI"
+  - "MU"
+  - "NOW"
+  - "NTAP"
+  - "NVDA"
+  - "NXPI"
+  - "ON"
+  - "ORCL"
+  - "PANW"
+  - "PLTR"
+  - "PTC"
+  - "Q"
+  - "QCOM"
+  - "ROP"
+  - "SMCI"
+  - "SNDK"
+  - "SNPS"
+  - "STX"
+  - "SWKS"
+  - "TDY"
+  - "TEL"
+  - "TER"
+  - "TRMB"
+  - "TXN"
+  - "TYL"
+  - "VRSN"
+  - "WDAY"
+  - "WDC"
+  - "ZBRA"
+  # Materials (25)
+  - "ALB"
+  - "AMCR"
+  - "APD"
+  - "AVY"
+  - "BALL"
+  - "CF"
+  - "CRH"
+  - "CTVA"
+  - "DOW"
+  - "ECL"
+  - "FCX"
+  - "IFF"
+  - "IP"
+  - "LIN"
+  - "LYB"
+  - "MLM"
+  - "MOS"
+  - "NEM"
+  - "NUE"
+  - "PKG"
+  - "PPG"
+  - "SHW"
+  - "STLD"
+  - "SW"
+  - "VMC"
+  # Real Estate (30)
+  - "AMT"
+  - "ARE"
+  - "BXP"
+  - "CBRE"
+  - "CCI"
+  - "CPT"
+  - "CSGP"
+  - "DLR"
+  - "DOC"
+  - "EQIX"
+  - "ESS"
+  - "EXR"
+  - "FRT"
+  - "HST"
+  - "INVH"
+  - "IRM"
+  - "KIM"
+  - "MAA"
+  - "O"
+  - "PLD"
+  - "PSA"
+  - "REG"
+  - "SBAC"
+  - "SPG"
+  - "UDR"
+  - "VICI"
+  - "VMRK"
+  - "VTR"
+  - "WELL"
+  - "WY"
+  # Utilities (31)
+  - "AEE"
+  - "AEP"
+  - "AES"
+  - "ATO"
+  - "AWK"
+  - "CEG"
+  - "CMS"
+  - "CNP"
+  - "D"
+  - "DTE"
+  - "DUK"
+  - "ED"
+  - "EIX"
+  - "ES"
+  - "ETR"
+  - "EVRG"
+  - "EXC"
+  - "FE"
+  - "LNT"
+  - "NEE"
+  - "NI"
+  - "NRG"
+  - "PCG"
+  - "PEG"
+  - "PNW"
+  - "PPL"
+  - "SO"
+  - "SRE"
+  - "VST"
+  - "WEC"
+  - "XEL"
 
 benchmark: SPY
+
+# GICS sector per ticker. Carried here because it comes free with the
+# constituent list and re-fetching it later is a chore; nothing in the
+# engine reads it yet. It is what a sector-neutral variant would need.
+sectors:
+  A: Health Care
+  AAPL: Information Technology
+  ABBV: Health Care
+  ABNB: Consumer Discretionary
+  ABT: Health Care
+  ACGL: Financials
+  ACN: Information Technology
+  ADBE: Information Technology
+  ADI: Information Technology
+  ADM: Consumer Staples
+  ADP: Industrials
+  ADSK: Information Technology
+  AEE: Utilities
+  AEP: Utilities
+  AES: Utilities
+  AFL: Financials
+  AIG: Financials
+  AIZ: Financials
+  AJG: Financials
+  AKAM: Information Technology
+  ALB: Materials
+  ALGN: Health Care
+  ALL: Financials
+  ALLE: Industrials
+  AMAT: Information Technology
+  AMCR: Materials
+  AMD: Information Technology
+  AME: Industrials
+  AMGN: Health Care
+  AMP: Financials
+  AMT: Real Estate
+  AMZN: Consumer Discretionary
+  ANET: Information Technology
+  AON: Financials
+  AOS: Industrials
+  APA: Energy
+  APD: Materials
+  APH: Information Technology
+  APO: Financials
+  APP: Communication Services
+  APTV: Consumer Discretionary
+  ARE: Real Estate
+  ARES: Financials
+  ATO: Utilities
+  AVGO: Information Technology
+  AVY: Materials
+  AWK: Utilities
+  AXON: Industrials
+  AXP: Financials
+  AZO: Consumer Discretionary
+  BA: Industrials
+  BAC: Financials
+  BALL: Materials
+  BAX: Health Care
+  BBY: Consumer Discretionary
+  BDX: Health Care
+  BEN: Financials
+  BF-B: Consumer Staples
+  BG: Consumer Staples
+  BIIB: Health Care
+  BKNG: Consumer Discretionary
+  BKR: Energy
+  BLDR: Industrials
+  BLK: Financials
+  BMY: Health Care
+  BNY: Financials
+  BR: Industrials
+  BRK-B: Financials
+  BRO: Financials
+  BSX: Health Care
+  BX: Financials
+  BXP: Real Estate
+  C: Financials
+  CAH: Health Care
+  CARR: Industrials
+  CASY: Consumer Staples
+  CAT: Industrials
+  CB: Financials
+  CBOE: Financials
+  CBRE: Real Estate
+  CCI: Real Estate
+  CCL: Consumer Discretionary
+  CDNS: Information Technology
+  CDW: Information Technology
+  CEG: Utilities
+  CF: Materials
+  CFG: Financials
+  CHD: Consumer Staples
+  CHRW: Industrials
+  CHTR: Communication Services
+  CI: Health Care
+  CIEN: Information Technology
+  CINF: Financials
+  CL: Consumer Staples
+  CLX: Consumer Staples
+  CMCSA: Communication Services
+  CME: Financials
+  CMG: Consumer Discretionary
+  CMI: Industrials
+  CMS: Utilities
+  CNC: Health Care
+  CNP: Utilities
+  COF: Financials
+  COHR: Information Technology
+  COIN: Financials
+  COO: Health Care
+  COP: Energy
+  COR: Health Care
+  COST: Consumer Staples
+  CPAY: Financials
+  CPRT: Industrials
+  CPT: Real Estate
+  CRH: Materials
+  CRL: Health Care
+  CRM: Information Technology
+  CRWD: Information Technology
+  CSCO: Information Technology
+  CSGP: Real Estate
+  CSX: Industrials
+  CTAS: Industrials
+  CTSH: Information Technology
+  CTVA: Materials
+  CVNA: Consumer Discretionary
+  CVS: Health Care
+  CVX: Energy
+  D: Utilities
+  DAL: Industrials
+  DASH: Consumer Discretionary
+  DD: Industrials
+  DDOG: Information Technology
+  DE: Industrials
+  DECK: Consumer Discretionary
+  DELL: Information Technology
+  DG: Consumer Staples
+  DGX: Health Care
+  DHI: Consumer Discretionary
+  DHR: Health Care
+  DIS: Communication Services
+  DLR: Real Estate
+  DLTR: Consumer Staples
+  DOC: Real Estate
+  DOV: Industrials
+  DOW: Materials
+  DPZ: Consumer Discretionary
+  DRI: Consumer Discretionary
+  DTE: Utilities
+  DUK: Utilities
+  DVA: Health Care
+  DVN: Energy
+  DXCM: Health Care
+  EBAY: Consumer Discretionary
+  ECHO: Communication Services
+  ECL: Materials
+  ED: Utilities
+  EFX: Industrials
+  EG: Financials
+  EIX: Utilities
+  EL: Consumer Staples
+  ELV: Health Care
+  EME: Industrials
+  EMR: Industrials
+  EOG: Energy
+  EQIX: Real Estate
+  EQT: Energy
+  ERIE: Financials
+  ES: Utilities
+  ESS: Real Estate
+  ETN: Industrials
+  ETR: Utilities
+  EVRG: Utilities
+  EW: Health Care
+  EXC: Utilities
+  EXE: Energy
+  EXPD: Industrials
+  EXPE: Consumer Discretionary
+  EXR: Real Estate
+  F: Consumer Discretionary
+  FANG: Energy
+  FAST: Industrials
+  FCX: Materials
+  FDS: Financials
+  FDX: Industrials
+  FDXF: Industrials
+  FE: Utilities
+  FERG: Industrials
+  FFIV: Information Technology
+  FICO: Information Technology
+  FIS: Financials
+  FISV: Financials
+  FITB: Financials
+  FIX: Industrials
+  FLEX: Information Technology
+  FOX: Communication Services
+  FOXA: Communication Services
+  FRT: Real Estate
+  FSLR: Information Technology
+  FTNT: Information Technology
+  FTV: Industrials
+  GD: Industrials
+  GDDY: Information Technology
+  GE: Industrials
+  GEHC: Health Care
+  GEN: Information Technology
+  GEV: Industrials
+  GILD: Health Care
+  GIS: Consumer Staples
+  GL: Financials
+  GLW: Information Technology
+  GM: Consumer Discretionary
+  GNRC: Industrials
+  GOOG: Communication Services
+  GOOGL: Communication Services
+  GPC: Consumer Discretionary
+  GPN: Financials
+  GRMN: Consumer Discretionary
+  GS: Financials
+  GWW: Industrials
+  HAL: Energy
+  HAS: Consumer Discretionary
+  HBAN: Financials
+  HCA: Health Care
+  HD: Consumer Discretionary
+  HIG: Financials
+  HII: Industrials
+  HLT: Consumer Discretionary
+  HON: Industrials
+  HONA: Industrials
+  HOOD: Financials
+  HPE: Information Technology
+  HPQ: Information Technology
+  HRL: Consumer Staples
+  HSIC: Health Care
+  HST: Real Estate
+  HSY: Consumer Staples
+  HUBB: Industrials
+  HUM: Health Care
+  HWM: Industrials
+  IBKR: Financials
+  IBM: Information Technology
+  ICE: Financials
+  IDXX: Health Care
+  IEX: Industrials
+  IFF: Materials
+  INCY: Health Care
+  INTC: Information Technology
+  INTU: Information Technology
+  INVH: Real Estate
+  IP: Materials
+  IQV: Health Care
+  IR: Industrials
+  IRM: Real Estate
+  ISRG: Health Care
+  IT: Information Technology
+  ITW: Industrials
+  IVZ: Financials
+  J: Industrials
+  JBHT: Industrials
+  JBL: Information Technology
+  JCI: Industrials
+  JKHY: Financials
+  JNJ: Health Care
+  JPM: Financials
+  KDP: Consumer Staples
+  KEY: Financials
+  KEYS: Information Technology
+  KHC: Consumer Staples
+  KIM: Real Estate
+  KKR: Financials
+  KLAC: Information Technology
+  KMB: Consumer Staples
+  KMI: Energy
+  KO: Consumer Staples
+  KR: Consumer Staples
+  KVUE: Consumer Staples
+  L: Financials
+  LDOS: Industrials
+  LEN: Consumer Discretionary
+  LH: Health Care
+  LHX: Industrials
+  LII: Industrials
+  LIN: Materials
+  LITE: Information Technology
+  LLY: Health Care
+  LMT: Industrials
+  LNT: Utilities
+  LOW: Consumer Discretionary
+  LRCX: Information Technology
+  LULU: Consumer Discretionary
+  LUV: Industrials
+  LVS: Consumer Discretionary
+  LYB: Materials
+  LYV: Communication Services
+  MA: Financials
+  MAA: Real Estate
+  MAR: Consumer Discretionary
+  MAS: Industrials
+  MCD: Consumer Discretionary
+  MCHP: Information Technology
+  MCK: Health Care
+  MCO: Financials
+  MDLZ: Consumer Staples
+  MDT: Health Care
+  MET: Financials
+  META: Communication Services
+  MGM: Consumer Discretionary
+  MKC: Consumer Staples
+  MLM: Materials
+  MMM: Industrials
+  MNST: Consumer Staples
+  MO: Consumer Staples
+  MOS: Materials
+  MPC: Energy
+  MPWR: Information Technology
+  MRK: Health Care
+  MRNA: Health Care
+  MRSH: Financials
+  MRVL: Information Technology
+  MS: Financials
+  MSCI: Financials
+  MSFT: Information Technology
+  MSI: Information Technology
+  MTB: Financials
+  MTD: Health Care
+  MU: Information Technology
+  NCLH: Consumer Discretionary
+  NDAQ: Financials
+  NDSN: Industrials
+  NEE: Utilities
+  NEM: Materials
+  NFLX: Communication Services
+  NI: Utilities
+  NKE: Consumer Discretionary
+  NOC: Industrials
+  NOW: Information Technology
+  NRG: Utilities
+  NSC: Industrials
+  NTAP: Information Technology
+  NTRS: Financials
+  NUE: Materials
+  NVDA: Information Technology
+  NVR: Consumer Discretionary
+  NWS: Communication Services
+  NWSA: Communication Services
+  NXPI: Information Technology
+  O: Real Estate
+  ODFL: Industrials
+  OKE: Energy
+  OMC: Communication Services
+  ON: Information Technology
+  ORCL: Information Technology
+  ORLY: Consumer Discretionary
+  OTIS: Industrials
+  OXY: Energy
+  PANW: Information Technology
+  PAYX: Industrials
+  PCAR: Industrials
+  PCG: Utilities
+  PEG: Utilities
+  PEP: Consumer Staples
+  PFE: Health Care
+  PFG: Financials
+  PG: Consumer Staples
+  PGR: Financials
+  PH: Industrials
+  PHM: Consumer Discretionary
+  PKG: Materials
+  PLD: Real Estate
+  PLTR: Information Technology
+  PM: Consumer Staples
+  PNC: Financials
+  PNR: Industrials
+  PNW: Utilities
+  PODD: Health Care
+  PPG: Materials
+  PPL: Utilities
+  PRU: Financials
+  PSA: Real Estate
+  PSKY: Communication Services
+  PSX: Energy
+  PTC: Information Technology
+  PWR: Industrials
+  PYPL: Financials
+  Q: Information Technology
+  QCOM: Information Technology
+  RCL: Consumer Discretionary
+  RDDT: Communication Services
+  REG: Real Estate
+  REGN: Health Care
+  RF: Financials
+  RJF: Financials
+  RL: Consumer Discretionary
+  RMD: Health Care
+  ROK: Industrials
+  ROL: Industrials
+  ROP: Information Technology
+  ROST: Consumer Discretionary
+  RSG: Industrials
+  RTX: Industrials
+  RVTY: Health Care
+  SBAC: Real Estate
+  SBUX: Consumer Discretionary
+  SCHW: Financials
+  SHW: Materials
+  SJM: Consumer Staples
+  SLB: Energy
+  SMCI: Information Technology
+  SNA: Industrials
+  SNDK: Information Technology
+  SNPS: Information Technology
+  SO: Utilities
+  SOLV: Health Care
+  SPG: Real Estate
+  SPGI: Financials
+  SRE: Utilities
+  STE: Health Care
+  STLD: Materials
+  STT: Financials
+  STX: Information Technology
+  STZ: Consumer Staples
+  SW: Materials
+  SWK: Industrials
+  SWKS: Information Technology
+  SYF: Financials
+  SYK: Health Care
+  SYY: Consumer Staples
+  T: Communication Services
+  TAP: Consumer Staples
+  TDG: Industrials
+  TDY: Information Technology
+  TECH: Health Care
+  TEL: Information Technology
+  TER: Information Technology
+  TFC: Financials
+  TGT: Consumer Staples
+  TJX: Consumer Discretionary
+  TKO: Communication Services
+  TMO: Health Care
+  TMUS: Communication Services
+  TPL: Energy
+  TPR: Consumer Discretionary
+  TRGP: Energy
+  TRMB: Information Technology
+  TROW: Financials
+  TRV: Financials
+  TSCO: Consumer Discretionary
+  TSLA: Consumer Discretionary
+  TSN: Consumer Staples
+  TT: Industrials
+  TTD: Communication Services
+  TTWO: Communication Services
+  TXN: Information Technology
+  TXT: Industrials
+  TYL: Information Technology
+  UAL: Industrials
+  UBER: Industrials
+  UDR: Real Estate
+  UHS: Health Care
+  ULTA: Consumer Discretionary
+  UNH: Health Care
+  UNP: Industrials
+  UPS: Industrials
+  URI: Industrials
+  USB: Financials
+  V: Financials
+  VEEV: Health Care
+  VICI: Real Estate
+  VLO: Energy
+  VLTO: Industrials
+  VMC: Materials
+  VMRK: Real Estate
+  VRSK: Industrials
+  VRSN: Information Technology
+  VRT: Industrials
+  VRTX: Health Care
+  VST: Utilities
+  VTR: Real Estate
+  VTRS: Health Care
+  VZ: Communication Services
+  WAB: Industrials
+  WAT: Health Care
+  WBD: Communication Services
+  WDAY: Information Technology
+  WDC: Information Technology
+  WEC: Utilities
+  WELL: Real Estate
+  WFC: Financials
+  WM: Industrials
+  WMB: Energy
+  WMT: Consumer Staples
+  WRB: Financials
+  WSM: Consumer Discretionary
+  WST: Health Care
+  WTW: Financials
+  WY: Real Estate
+  WYNN: Consumer Discretionary
+  XEL: Utilities
+  XOM: Energy
+  XYL: Industrials
+  XYZ: Financials
+  YUM: Consumer Discretionary
+  ZBH: Health Care
+  ZBRA: Information Technology
+  ZTS: Health Care
 
 data:
   start_date: "2019-01-01"
