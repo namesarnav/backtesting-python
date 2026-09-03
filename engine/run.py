@@ -45,9 +45,9 @@ cache was cleared or the universe in configs/universe.yaml was changed.
 To refetch:
   1. open https://finance.yahoo.com in a browser
   2. paste scripts/yahoo_browser_fetch.js into the JavaScript console
-  3. mv ~/Downloads/yahoo_panel.json data/
+  3. mv ~/Downloads/yahoo_panel_*.json data/browser/
   4. python -c "from engine.data_loader import DataLoader; \\
-                DataLoader().ingest_browser_panel('data/yahoo_panel.json')"
+                DataLoader().ingest_browser_panel('data/browser')"
 """
 
 

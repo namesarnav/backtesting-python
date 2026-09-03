@@ -29,14 +29,20 @@ Design choices (documented per spec):
   avoids re-concatenating on every run. Parquet (not CSV) preserves dtypes
   and is much faster to read back.
 - **Missing data**: within a ticker's own history, small gaps (e.g. vendor
-  glitches) are forward-filled up to `ffill_limit` trading days. After that,
-  the panel is trimmed to the first date on which *every* ticker has data
-  (`dropna` on the intersection) — i.e. we don't try to represent
-  pre-IPO/pre-listing history as NaN rows inside the panel; we simply start
-  the panel later. For this project's universe (long-established large
-  caps), that start date is expected to equal `start_date`. This is
-  documented rather than silently forward-filled so a suspicious trim shows
-  up immediately instead of being masked.
+  glitches) are forward-filled up to `ffill_limit` trading days. Pre-listing
+  history is not represented as NaN rows inside the panel; the panel is
+  instead trimmed to the first date on which every remaining ticker has
+  data.
+- **Coverage**: that trim is safe only while every ticker predates
+  `start_date`, which was true of the original 40-name universe and is not
+  true of the S&P 500 — roughly a fifth of current constituents listed
+  after 2019, and one 2021 IPO would drag a five-year panel down to two
+  years without comment. So `require_full_history` (default on) drops
+  tickers that do not span the requested window and records them in
+  `dropped_tickers`, rather than moving the window to accommodate them. It
+  is a selection rule and is reported as one: the surviving universe is
+  biased towards names already listed at the start of the window. See
+  `_apply_coverage_filter`.
 
 Yahoo blocks scripted HTTP clients: `query1`/`query2` return HTTP 429 to
 `requests` and `curl` on every network tested (cellular and residential),
@@ -92,6 +98,9 @@ class DataLoader:
     cache_dir : where per-ticker and panel-level Parquet caches live.
     ffill_limit : max consecutive trading days to forward-fill a gap within
         a single ticker's history before giving up on it.
+    require_full_history : drop tickers that do not span the requested window
+        rather than moving the window to accommodate them. See
+        `_apply_coverage_filter`.
     """
 
     def __init__(
@@ -102,6 +111,7 @@ class DataLoader:
         interval: str | None = None,
         cache_dir: str | Path = DEFAULT_CACHE_DIR,
         ffill_limit: int = 5,
+        require_full_history: bool = True,
     ):
         cfg = _load_universe_config()
         self.tickers = tickers or list(cfg["tickers"])
@@ -109,6 +119,11 @@ class DataLoader:
         self.end = end or cfg["data"]["end_date"]
         self.interval = interval or cfg["data"]["interval"]
         self.ffill_limit = ffill_limit
+        self.require_full_history = require_full_history
+        # Filled in by load_panel(): [(ticker, reason), ...] for anything the
+        # coverage filter removed. Empty is the expected case for a universe
+        # of names that were all listed before `start`.
+        self.dropped_tickers: list[tuple[str, str]] = []
 
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -121,7 +136,10 @@ class DataLoader:
 
     def _panel_cache_path(self) -> Path:
         digest = hashlib.sha1(
-            "|".join(sorted(self.tickers) + [self.start, self.end, self.interval]).encode()
+            "|".join(
+                sorted(self.tickers)
+                + [self.start, self.end, self.interval, f"full={self.require_full_history}"]
+            ).encode()
         ).hexdigest()[:16]
         return self.cache_dir / f"panel_{digest}.parquet"
 
@@ -219,20 +237,37 @@ class DataLoader:
         writes the per-ticker cache exactly as a direct fetch would, after
         which `load_panel()` works offline and nothing downstream can tell
         the difference.
+
+        `path` may be a single JSON file or a directory of them. At 500
+        tickers the capture is chunked across several files -- one blob of
+        that size is both an awkward download and an all-or-nothing one, so
+        the fetch script writes a file per 50 tickers and this reads the lot.
         """
-        payload = json.loads(Path(path).read_text())
+        path = Path(path)
+        files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+        if not files:
+            raise ValueError(f"no .json capture files found in {path}")
+
+        payload: dict = {}
+        for f in files:
+            payload.update(json.loads(f.read_text()))
 
         written = []
         for ticker, chart in payload.items():
             results = (chart or {}).get("chart", {}).get("result") or []
             if not results:
                 raise ValueError(f"no chart result for {ticker!r} in {path}")
+            if not results[0].get("timestamp"):
+                # A symbol with no bars in the window (listed after `end`, or
+                # renamed since). Skipped here so one such name does not abort
+                # the ingest of 500; load_panel's coverage filter reports it.
+                continue
             df = self._parse_chart_result(ticker, results[0])
             self._write_ticker_cache(ticker, df)
             written.append(ticker)
         return sorted(written)
 
-    def _load_all_tickers(self) -> dict[str, pd.DataFrame]:
+    def _load_all_tickers(self) -> tuple[dict[str, pd.DataFrame], list[tuple[str, str]]]:
         data: dict[str, pd.DataFrame] = {}
         missing = []
         for ticker in self.tickers:
@@ -242,8 +277,66 @@ class DataLoader:
             else:
                 missing.append(ticker)
 
-        data.update(self._fetch_missing(missing))
-        return data
+        if not self.require_full_history:
+            data.update(self._fetch_missing(missing))
+            return data, []
+
+        # With a universe drawn from current index membership, some tickers
+        # legitimately have no data in the window at all -- a symbol that only
+        # started trading after `end` (a 2024 IPO), or a company that has since
+        # been renamed and whose old prices live under a different symbol.
+        # Those are a coverage question, not an outage, so they are recorded
+        # and carried into the same report as the short-history drops. A real
+        # outage still surfaces, as the floor check in load_panel().
+        unavailable: list[tuple[str, str]] = []
+        for ticker in missing:
+            try:
+                fetched = self._fetch_missing([ticker])
+            except Exception as exc:  # noqa: BLE001 - reported, then dropped
+                unavailable.append((ticker, f"no data ({type(exc).__name__})"))
+                continue
+            data.update(fetched)
+        return data, unavailable
+
+    def _apply_coverage_filter(
+        self, per_ticker: dict[str, pd.DataFrame]
+    ) -> tuple[dict[str, pd.DataFrame], list[tuple[str, str]]]:
+        """Drop tickers that do not span the requested window, and say which.
+
+        On the original 40-name universe of long-established large caps this
+        was a no-op, and `load_panel`'s behaviour of trimming to the first
+        fully-populated row was harmless. On the S&P 500 it is neither: about
+        a fifth of current constituents listed after 2019, and trimming
+        resolves a single 2021 IPO by moving the *panel's* start date to 2021.
+        A five-year backtest would quietly become a two-year one, with nothing
+        in the output saying so -- the exact class of silent-wrong-answer this
+        project exists to avoid.
+
+        Dropping the ticker rather than the history is the lesser evil, but it
+        is still a selection rule, so it is reported rather than applied
+        quietly: the survivors are the names already listed at the start of
+        the window, which is a mild bias *against* recent listings and needs
+        to be stated wherever results are.
+
+        The reference window is the requested one, not something inferred from
+        the data, so the rule does not shift when the universe changes. A
+        week of grace absorbs the gap between a calendar boundary and the
+        nearest trading day.
+        """
+        grace = pd.Timedelta(days=7)
+        need_start = pd.Timestamp(self.start) + grace
+        need_end = pd.Timestamp(self.end) - grace
+
+        kept, dropped = {}, []
+        for ticker, df in per_ticker.items():
+            first, last = df.index.min(), df.index.max()
+            if first > need_start:
+                dropped.append((ticker, f"starts {first.date()}"))
+            elif last < need_end:
+                dropped.append((ticker, f"ends {last.date()}"))
+            else:
+                kept[ticker] = df
+        return kept, sorted(dropped)
 
     # -- public API ---------------------------------------------------------
 
@@ -253,12 +346,33 @@ class DataLoader:
         Guarantees no NaNs remain in the returned panel (see module
         docstring for how gaps/misalignment are resolved). Raises if a
         ticker fails to produce any usable rows.
+
+        With `require_full_history` (the default), tickers that do not span
+        the requested window are dropped and listed in `self.dropped_tickers`
+        instead of dragging the window forward to meet them.
         """
         panel_cache = self._panel_cache_path()
         if use_panel_cache and panel_cache.exists():
             return pd.read_parquet(panel_cache)
 
-        per_ticker = self._load_all_tickers()
+        per_ticker, unavailable = self._load_all_tickers()
+
+        self.dropped_tickers = []
+        if self.require_full_history:
+            per_ticker, short = self._apply_coverage_filter(per_ticker)
+            self.dropped_tickers = sorted(unavailable + short)
+
+            # A fifth of the S&P 500 listing late is expected; most of it
+            # vanishing is a broken cache, and must not be mistaken for a
+            # coverage result. Fail loudly at that point.
+            floor = int(0.75 * len(self.tickers))
+            if len(per_ticker) < floor:
+                raise ValueError(
+                    f"only {len(per_ticker)} of {len(self.tickers)} tickers cover "
+                    f"{self.start}..{self.end} (floor {floor}) — this looks like a "
+                    f"cache or fetch problem, not a universe problem. First few "
+                    f"drops: {self.dropped_tickers[:5]}"
+                )
 
         panel = pd.concat(per_ticker, axis=1)  # columns: (ticker, field)
         panel = panel.reorder_levels([1, 0], axis=1).sort_index(axis=1)
@@ -315,6 +429,11 @@ def main() -> None:
 
     elapsed = time.perf_counter() - started
     close = panel["close"]
+    if loader.dropped_tickers:
+        print(f"\ndropped {len(loader.dropped_tickers)} tickers lacking full coverage:")
+        for ticker, reason in loader.dropped_tickers:
+            print(f"    {ticker:<6} {reason}")
+
     print(f"\nOK  {panel.shape[0]} rows x {close.shape[1]} tickers in {elapsed:.1f}s")
     print(f"    dates  {close.index[0].date()} -> {close.index[-1].date()}")
     print(f"    NaNs   {int(panel.isna().sum().sum())}")

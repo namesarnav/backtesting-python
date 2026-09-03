@@ -9,6 +9,11 @@ venv/
 # ~0.1s), so they stay ignored.
 data/cache/panel_*.parquet
 data/*.parquet
+# Raw browser/node captures: ~70MB of JSON that exists only to be turned
+# into the per-ticker Parquet above. Keeping both would commit the same
+# prices twice, in the more verbose format.
+data/browser/
+data/*.json
 # notebooks/results/*.png is deliberately NOT ignored: the README embeds
 # these charts, and Phase 8 requires a clone to show them without a rebuild.
 notebooks/results/*.html

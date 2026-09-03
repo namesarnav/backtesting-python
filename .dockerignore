@@ -5,6 +5,7 @@ venv/
 __pycache__/
 *.pyc
 data/*.json
+data/browser/
 notebooks/results/*.png
 build/
 *.so
