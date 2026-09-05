@@ -113,7 +113,11 @@ def check_correctness(close, panel, config) -> list[str]:
 
 def benchmark_real(close, panel, config) -> list[str]:
     """Time the actual workload this repo runs."""
-    lines = ["", "WALL CLOCK  (real panel: 1,258 bars x 40 tickers)", ""]
+    # Read the shape off the panel rather than writing it into the string:
+    # the universe has changed size once already, and a hardcoded width in a
+    # benchmark header is a caption that quietly stops matching its numbers.
+    lines = ["", f"WALL CLOCK  (real panel: {close.shape[0]:,} bars x "
+             f"{close.shape[1]:,} tickers)", ""]
     lines.append(f"{'strategy':<16}{'python':>12}{'cpp':>10}{'speedup':>10}"
                  f"{'  (full run() end to end)':>28}")
     lines.append("-" * 76)
