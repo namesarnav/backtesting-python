@@ -218,28 +218,38 @@ class VectorizedBacktester:
     def _trade_log(positions: pd.DataFrame) -> pd.DataFrame:
         """Long-format record of every position change.
 
-        Only rows that actually changed -- logging 40 tickers x 1250 days of
-        mostly-unchanged positions would bury the signal in noise.
+        Only rows that actually changed -- logging a 476-ticker book over
+        1,258 days of mostly-unchanged positions would bury the signal in
+        noise.
+
+        Select first, then build. The obvious implementation melts all three
+        frames to long format and merges them, which materializes
+        `dates x tickers` rows three times over and joins them before
+        throwing nearly all of it away. That is invisible on a 40-ticker
+        panel and dominant on a 476-ticker one: it cost ~180ms against ~10ms
+        of actual backtest arithmetic, and it cost the same 180ms for the
+        pairs strategy, whose entire trade log is 36 rows. Taking the
+        non-zero coordinates up front makes the work proportional to the
+        number of trades rather than to the size of the book.
         """
         previous = positions.shift(1).fillna(0.0)
         delta = positions - previous
 
-        def _melt(frame: pd.DataFrame, value_name: str) -> pd.DataFrame:
-            return (
-                frame.rename_axis(index="date", columns="ticker")
-                .melt(ignore_index=False, var_name="ticker", value_name=value_name)
-                .reset_index()
-            )
+        delta_values = delta.to_numpy()
+        rows, cols = np.nonzero(np.abs(delta_values) > TRADE_TOLERANCE)
 
-        trades = (
-            _melt(delta, "delta")
-            .merge(_melt(previous, "prev_weight"), on=["date", "ticker"])
-            .merge(_melt(positions, "new_weight"), on=["date", "ticker"])
+        # np.nonzero yields row-major order, i.e. already sorted by date and
+        # then by column position; the panel's columns are sorted by ticker,
+        # so this is the ["date", "ticker"] ordering the old sort produced.
+        return pd.DataFrame(
+            {
+                "date": positions.index.to_numpy()[rows],
+                "ticker": positions.columns.to_numpy()[cols],
+                "prev_weight": previous.to_numpy()[rows, cols],
+                "new_weight": positions.to_numpy()[rows, cols],
+                "delta": delta_values[rows, cols],
+            }
         )
-
-        trades = trades[trades["delta"].abs() > TRADE_TOLERANCE]
-        trades = trades.sort_values(["date", "ticker"]).reset_index(drop=True)
-        return trades[["date", "ticker", "prev_weight", "new_weight", "delta"]]
 
     # -- public API -------------------------------------------------------
 
