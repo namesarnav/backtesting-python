@@ -6,29 +6,29 @@ CORRECTNESS  (both backends, real panel)
 
 strategy           max |return diff|   final equity diff     fills
 ------------------------------------------------------------------
-mean_reversion              7.77e-15            2.27e-15    41,527
-momentum                    4.44e-16            0.00e+00     4,960
-pairs                       4.44e-16            1.63e-15       956
+mean_reversion              6.89e-14            2.18e-14   493,386
+momentum                    2.55e-15            1.87e-15    59,150
+pairs                       4.44e-16            1.08e-15       762
 
-Worst disagreement: 7.77e-15 -- float-ordering noise, not a difference in result.
+Worst disagreement: 6.89e-14 -- float-ordering noise, not a difference in result.
 
-WALL CLOCK  (real panel: 1,258 bars x 40 tickers)
+WALL CLOCK  (real panel: 1,258 bars x 476 tickers)
 
 strategy              python       cpp   speedup     (full run() end to end)
 ----------------------------------------------------------------------------
-mean_reversion       25.06ms    0.53ms     47.2x          27.5ms ->    2.7ms  (10.0x)
-momentum              9.51ms    0.34ms     27.6x          11.2ms ->    1.7ms  (6.7x)
-pairs                 7.80ms    0.24ms     32.3x           9.7ms ->    1.9ms  (5.2x)
+mean_reversion      248.42ms    9.93ms     25.0x         269.8ms ->   27.9ms  (9.7x)
+momentum             39.36ms    4.62ms      8.5x          52.2ms ->   16.3ms  (3.2x)
+pairs                11.13ms    3.90ms      2.9x          26.4ms ->   17.6ms  (1.5x)
 
 SCALING  (1,258 bars, varying width -- synthetic)
 
   assets      python       cpp   speedup   python us/bar   cpp us/bar
 ---------------------------------------------------------------------
-       5      9.85ms    0.06ms    168.2x            7.83         0.05
-      20     17.86ms    0.29ms     61.8x           14.20         0.23
-      40     28.25ms    0.70ms     40.4x           22.46         0.56
-     100     61.28ms    1.87ms     32.8x           48.72         1.48
-     500    311.68ms   14.57ms     21.4x          247.76        11.58
+       5      9.65ms    0.06ms    161.8x            7.67         0.05
+      20     17.38ms    0.38ms     45.6x           13.81         0.30
+      40     28.94ms    0.70ms     41.5x           23.01         0.55
+     100     61.23ms    1.91ms     32.0x           48.67         1.52
+     500    316.08ms   11.94ms     26.5x          251.26         9.49
 
 The speedup shrinks as the book widens: with 500 tickers the arrays are
 large enough that NumPy's arithmetic dominates its own call overhead, so

@@ -78,7 +78,7 @@ Caching I did in two layers, which sounds like over-engineering until you
 think about why. One Parquet file per ticker, plus one combined file for the
 assembled panel. Two layers because they solve different annoyances: the
 per-ticker files mean that adding one stock to my universe re-downloads one
-stock rather than all forty-one, and the combined file means that just
+stock rather than all five hundred, and the combined file means that just
 re-running the thing doesn't re-do the assembly work. Parquet rather than
 CSV because it remembers what a date is instead of making me re-parse
 strings every time.
@@ -111,7 +111,7 @@ loader has a function that reads it and pushes it through the same parsing
 and adjustment code as the direct download path — so however the prices
 arrived, they get treated identically.
 
-Then I committed the cached data to the repo. About 2.8MB of Parquet: 40
+Then I committed the cached data to the repo. About 30MB of Parquet: 476
 stocks plus SPY, January 2019 through December 2023, 1,258 trading days,
 zero missing values.
 
@@ -128,7 +128,7 @@ and that "it worked on my machine last Tuesday" is not a data source.
 
 ## The engine itself
 
-The core is about 290 lines, and honestly most of that is comments.
+The core is about 300 lines, and honestly most of that is comments.
 
 It takes prices and signals, and it does this in this order: check the two
 line up, turn the raw signals into actual portfolio weights, **lag them by a
@@ -225,7 +225,7 @@ running. Adding a fourth is one new file and one config entry.
 **Momentum** is the oldest documented pattern in stocks: things that have
 been going up tend to keep going up, at least for a few months. Every day I
 measure each stock's return over the last 126 trading days (about six
-months), rank all forty against each other *on that day*, and buy the top
+months), rank all 476 against each other *on that day*, and buy the top
 10%.
 
 The word "against each other" is doing a lot of work. The comparison is
@@ -276,15 +276,15 @@ mean-reverting way. That residual is what you actually trade. The regression
 also gives you the hedge ratio — how many shares of one offset a share of
 the other, so the market exposure cancels.
 
-With forty stocks there are 780 possible pairs, and running the full
+With 476 stocks there are 113,050 possible pairs, and running the full
 statistical test on all of them is slow, so I pre-screen by correlation
-(cheap) and only run the real test on the ten most promising.
+(cheap) and only run the real test on the twenty most promising.
 
 And here's the sneaky look-ahead problem I promised.
 
-The obvious way to build this is: test all 780 pairs over the whole five
-years, find the most cointegrated one, then backtest that pair over those
-same five years. It produces a gorgeous chart. It is also completely
+The obvious way to build this is: test all 113,050 pairs over the whole
+five years, find the most cointegrated one, then backtest that pair over
+those same five years. It produces a gorgeous chart. It is also completely
 worthless, because you *chose the pair using knowledge of how it turned
 out*. You could not have known in January 2019 which pair was going to stay
 glued together through 2023.
@@ -354,44 +354,69 @@ leaked.
 
 ## What came out
 
-Forty liquid US stocks across six sectors, 2019 through 2023, after fees,
+476 S&P 500 stocks across all eleven sectors, 2019 through 2023, after fees,
 positions lagged a day.
 
 | strategy | ann return | ann vol | Sharpe | max DD | **out-of-sample Sharpe** | beta |
 |---|---:|---:|---:|---:|---:|---:|
-| mean reversion | −13.33% | 18.05% | −0.70 | −51.2% | **−0.89** | 0.39 |
-| momentum | 19.40% | 27.45% | 0.78 | −32.3% | **0.90** | 0.88 |
-| pairs | 2.80% | 5.82% | 0.50 | −11.3% | **−0.25** | −0.02 |
+| mean reversion | −8.03% | 17.83% | −0.38 | −38.2% | **−0.20** | 0.39 |
+| momentum | 13.57% | 22.26% | 0.68 | −34.0% | **0.77** | 0.87 |
+| pairs | 1.55% | 16.33% | 0.18 | −19.4% | **−0.18** | 0.10 |
 | *SPY buy & hold* | *15.60%* | *20.99%* | *0.80* | *−33.7%* | — | *1.00* |
 
-Momentum is the one that fools people, and it nearly fooled me. It made
-19.4% a year against SPY's 15.6%. That looks like a win, and if I'd stopped
-at that column I'd have written it up as one. But look one column over: it
-did that with 27.5% volatility against SPY's 21.0%. Per unit of risk taken,
-it's *worse* than the index. And its beta of 0.88 says most of that return
-is just market exposure, which anyone can buy for free by holding SPY. The
-honest description is "a leveraged index fund with extra trading costs."
+I should say up front that this table used to look different, because I ran
+all of this on 40 hand-picked large caps first and only later widened it to
+the whole index. Every strategy got worse. That's worth sitting with for a
+second: nothing about the code changed, and the only thing I did was stop
+choosing the stocks myself.
 
-I think this is the single most common way a student backtest lies to its
-author. The return number is bigger, so it reads as skill. It isn't skill,
-it's leverage plus fees.
+Momentum is the one that fools people, and on the small universe it nearly
+fooled me. There it made 19.4% a year against SPY's 15.6% — more money, and
+if I'd stopped at that column I'd have written it up as a win. What saved me
+was looking one column over: it earned that with 27.5% volatility against
+SPY's 21.0%, so per unit of risk it was already *worse* than the index, and
+a beta of 0.88 said most of the return was market exposure anyone can buy
+for free. "A leveraged index fund with extra trading costs."
 
-Pairs is the cautionary tale, and it's the one that justifies all the
-walk-forward machinery. Over the full sample it scores 0.50 — a modest,
-believable success. Out of sample it scores **−0.25**. That entire gap is
-the value of having picked the pair after seeing the whole period.
-Re-select the pair on each training window, trade the next six months blind,
-and the edge evaporates. Any pairs backtest that doesn't do this is
-reporting fiction, and mine would have been too.
+On 476 names it doesn't even get that far. It returns 13.57% against the
+same 15.6%, so it now loses on the raw number too, and its information ratio
+against SPY is −0.11 — the active part isn't out-performance, it's noise
+with a fee attached. Ranking forty stocks against each other is a thin
+cross-section, thin enough that a handful of names I happened to choose
+carried the result. Ranking 476 is the test the strategy was always implicitly
+claiming to pass.
 
-Mean reversion isn't wrong so much as it's eaten alive. It trades 33,751
-times, roughly 3.9% of capital a year in fees before it's been right or
-wrong about anything. Turn the cost model off and it looks respectable.
-That's the whole argument for having a cost model.
+I think that's the single most common way a student backtest lies to its
+author, and it lies twice: the return number is bigger so it reads as skill,
+and the universe is small enough that you're the one who picked the winners.
 
-And pairs is the only genuinely market-neutral one — beta of −0.02, worst
-drawdown of 11% against everyone else's 32% to 51%. It delivers exactly the
-risk profile it advertises. It just doesn't make money.
+Pairs is the cautionary tale, and widening the universe turned it into a
+much better one. With forty stocks there were 780 possible pairs. With 476
+there are 113,050, and the best of them — HBAN and TFC, two regional banks —
+cointegrates at p = 0.0007, which is a far more convincing number than
+anything the small universe could offer. Full sample it scores 0.18. Out of
+sample it scores **−0.18**.
+
+So searching 145 times harder bought a much better-looking pair and exactly
+no edge. That's the cleanest statement of the problem I could have asked
+for. At a 5% threshold across 113,050 tests you'd expect something like
+5,600 pairs to look significant by pure chance, so "it passed a
+cointegration test" carries almost no information unless the pair was chosen
+before the period you're scoring it on. The formation window is what makes
+that true here, and it's why the out-of-sample number is the only one I'd
+quote.
+
+Mean reversion isn't wrong so much as it's eaten alive. It trades 478,302
+times, about 3.6% of capital a year in fees before it's been right or wrong
+about anything. Turn the cost model off and it looks respectable. That's the
+whole argument for having a cost model.
+
+Pairs still has the least market exposure — beta 0.10, worst drawdown 19%
+against everyone else's 34% to 38%. But it's noticeably less neutral than
+the two-stock version was on the small universe, where it ran at beta −0.02
+and 5.8% volatility. A spread between two regional banks is not a
+market-neutral position so much as a bet on regional banks, and 2023 was not
+the year to be quietly holding one of those.
 
 So: three strategies, three completely different reasons for not working.
 One is beta in disguise, one is selection bias, one is transaction costs. I'd
@@ -468,7 +493,7 @@ overnight, your 5% drifts to 5.3%, and pulling it back to 5% is a real trade
 that a real broker really charges you for. The simulation tracks shares, so
 it sees those trades. The vectorized version structurally cannot.
 
-The place this bites hardest is pairs, where measured trading jumps 46%.
+The place this bites hardest is pairs, where measured trading jumps 40%.
 Which makes sense once you see it: pairs holds a nearly static two-stock
 position, so almost *all* of its real trading is drift correction — exactly
 the category the fast engine is blind to. The strategy that looked cheapest
@@ -513,10 +538,11 @@ somebody else's C.
 The simulation loop is the opposite situation, and this is why building it
 first mattered. It's irreducibly serial — tomorrow's equity depends on
 today's fills, so you can't vectorize it away — and in Python each day pays
-for about fifteen separate NumPy calls on 40-element arrays. At that size,
-the *overhead* of each call (allocate a temporary, check the types, manage
-reference counts, return an object) completely dwarfs the forty
-multiply-adds of actual arithmetic. That's real, removable waste.
+for about fifteen separate NumPy calls. The *overhead* of each call
+(allocate a temporary, check the types, manage reference counts, return an
+object) is fixed, so how much of it there is to delete depends entirely on
+how much real arithmetic sits underneath it. On a narrow book, that overhead
+is most of the runtime. That's real, removable waste.
 
 So the C++ file is a line-for-line translation of the Python loop. Same
 variable names, same order of operations. Deliberately boring, because I
@@ -524,39 +550,50 @@ want to be measuring the language, not comparing two different algorithms.
 
 Correctness came before any timing, since a speedup from code that computes
 something else isn't a speedup. Across all three strategies on real data,
-the largest disagreement in daily returns is about 8e-15, with identical
+the largest disagreement in daily returns is about 7e-14, with identical
 trade counts — that's floating-point ordering noise, because NumPy sums in
 pairs and my loop sums in order, so they differ in the last bit.
 
-The loop itself came out 28 to 47 times faster depending on the strategy.
-But I report a second number alongside it, because the honest end-to-end
-figure is 5 to 10x: a user calls the full function, which also builds a
-dozen pandas objects around the loop that C++ never touches. Quoting only
-the 47x would overstate what anyone actually experiences.
+The loop itself came out 3 to 25 times faster depending on the strategy. But
+I report a second number alongside it, because the honest end-to-end figure
+is 1.5 to 10x: a user calls the full function, which also builds a dozen
+pandas objects around the loop that C++ never touches. Quoting only the
+biggest number would overstate what anyone actually experiences.
+
+Those figures are a lot smaller than the ones I first measured. On the
+40-stock universe the same benchmark said 28 to 47 times on the loop and 5
+to 10 end to end. Widening to 476 stocks cut it by roughly a factor of three
+without either implementation changing by a line — which, annoyingly for my
+ego and usefully for my understanding, is exactly what I'd already predicted
+in the section below.
 
 The result I like most is the scaling table. Holding the number of days
 fixed and varying only how many stocks are in the portfolio:
 
 ```
-  assets      python       cpp   speedup
-       5      9.85ms    0.06ms    168.2x
-      20     17.86ms    0.29ms     61.8x
-      40     28.25ms    0.70ms     40.4x
-     100     61.28ms    1.87ms     32.8x
-     500    311.68ms   14.57ms     21.4x
+  assets      python       cpp   speedup   python us/bar   cpp us/bar
+       5      9.65ms    0.06ms    161.8x            7.67         0.05
+      20     17.38ms    0.38ms     45.6x           13.81         0.30
+      40     28.94ms    0.70ms     41.5x           23.01         0.55
+     100     61.23ms    1.91ms     32.0x           48.67         1.52
+     500    316.08ms   11.94ms     26.5x          251.26         9.49
 ```
 
 The speedup *shrinks* as the portfolio widens, and that's the whole
 explanation of the result. Python pays the same fixed per-call overhead
 whether the array has 5 elements or 500 — so the narrower the portfolio, the
 more of the runtime is pure interpreter tax, and the more there is to
-delete. By 500 stocks the arrays are finally big enough that NumPy's actual
-arithmetic dominates, and the gap closes to 21x.
+delete. The two columns on the right say it most directly: going from 5
+stocks to 500, the Python loop gets about 33 times slower per day while the
+C++ loop gets 190 times slower, because C++ was only ever paying for the
+arithmetic, and the arithmetic is the part that grew.
 
 So the claim isn't "C++ beats NumPy at maths." It's "C++ doesn't pay a
 dispatch tax fifteen times a day." A benchmark that just said "47x faster!"
 would have hidden the entire mechanism, and it's the mechanism that's
-interesting.
+interesting — which is also why I'm happy rather than annoyed that the
+number fell when the universe grew. A speedup that survives changing the
+problem size without explanation is a speedup you don't understand.
 
 Two things had to change to make the port work, and both turned out to be
 improvements to the *Python* side.
@@ -592,7 +629,7 @@ suite would notice.
 
 ## About the tests
 
-There are 102 of them and they run in about three seconds, but the count
+There are 106 of them and they run in about three seconds, but the count
 isn't the point. Every one exists because some specific wrong answer would
 otherwise have looked right.
 
@@ -632,10 +669,13 @@ Every number in the writeup is generated by the code that computes it, so
 nothing is typed by hand.
 
 There's a list of limitations in the README that I'd rather state than have
-someone find. The big one is survivorship bias — my forty stocks are forty
-companies that exist *today*, so anything that went bankrupt between 2019
-and 2023 simply isn't in the sample, which flatters every result including
-the benchmark. Costs are a flat percentage with no market impact. Shorts are
+someone find. The big one is survivorship bias, and widening the universe
+made it worse rather than better. My 476 names are the S&P 500 *as it stands
+today*, so anything that went bankrupt or got acquired or shrank out of the
+index between 2019 and 2023 simply isn't in the sample — and 118 of the
+names in it only joined the index after 2019, which means holding them from
+the start is a trade nobody could have made. Both errors flatter every
+result, including the benchmark. Costs are a flat percentage with no market impact. Shorts are
 assumed free to borrow, which they aren't, especially for the names mean
 reversion wants to short. And Sharpe uses a 0% risk-free rate over a period
 when rates went from 2.4% to 5%, which makes every risk-adjusted number here
@@ -654,7 +694,7 @@ don't control can just stop working. Proving there's no look-ahead, because
 you can't do that by reading code — you have to produce a number that moves
 by 21% when you delete one line. And building the engine twice, because the
 second implementation is the only way to find out what the first one was
-assuming. The 46% understatement on pairs wasn't a hypothesis I tested. It
+assuming. The 40% understatement on pairs wasn't a hypothesis I tested. It
 fell out.
 
 The conclusion I'd defend hardest is the boring one: nothing here beats

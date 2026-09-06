@@ -27,15 +27,23 @@ engine twice exposed about the first one.
 
 ## Results
 
-40 liquid US equities across six sectors, 2019-01-02 to 2023-12-29 (1,258
-trading days), net of 5bp transaction cost and 2bp slippage, positions lagged
-one day.
+476 S&P 500 constituents across all 11 GICS sectors, 2019-01-02 to 2023-12-29
+(1,258 trading days), net of 5bp transaction cost and 2bp slippage, positions
+lagged one day.
+
+The universe is current index membership filtered to names with complete
+coverage of the window: 27 of 503 are dropped for listing late (COIN, ABNB,
+PLTR, CARR…) or for trading under a symbol that did not exist before 2024.
+That filter is reported, not silent — `python -m engine.data_loader` names
+every drop — because it is a selection rule, and it biases the survivors
+towards companies already listed in 2019. `configs/universe.yaml` states what
+that costs.
 
 | strategy | ann return | ann vol | Sharpe | Sortino | max DD | Calmar | **OOS Sharpe** | beta | turnover |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| mean reversion | −13.33% | 18.05% | −0.70 | −0.97 | −51.2% | −0.26 | **−0.89** | 0.39 | 0.220 |
-| momentum | 19.40% | 27.45% | 0.78 | 1.10 | −32.3% | 0.60 | **0.90** | 0.88 | 0.172 |
-| pairs | 2.80% | 5.82% | 0.50 | 0.76 | −11.3% | 0.25 | **−0.25** | −0.02 | 0.013 |
+| mean reversion | −8.03% | 17.83% | −0.38 | −0.52 | −38.2% | −0.21 | **−0.20** | 0.39 | 0.206 |
+| momentum | 13.57% | 22.26% | 0.68 | 0.95 | −34.0% | 0.40 | **0.77** | 0.87 | 0.160 |
+| pairs | 1.55% | 16.33% | 0.18 | 0.26 | −19.4% | 0.08 | **−0.18** | 0.10 | 0.014 |
 | *SPY buy & hold* | *15.60%* | *20.99%* | *0.80* | *1.11* | *−33.7%* | *0.46* | — | *1.00* | — |
 
 `OOS Sharpe` is from walk-forward validation: 5 folds of 504 training days
@@ -44,29 +52,38 @@ on training data only.
 
 ### Reading the table
 
-**Momentum earns more than SPY but is not better than SPY.** 19.4% vs 15.6%
-looks like a win until you notice the volatility: 27.5% vs 21.0%. Sharpe 0.78
-against SPY's 0.80 — it is *worse* per unit of risk. Beta 0.88 says most of
-that return is market exposure anyone can buy for free, and an information
-ratio of 0.24 says the leftover out-performance is not consistent. The honest
-summary is "a leveraged index fund with extra trading costs."
+**Momentum loses to SPY on every axis, and the wider universe is what
+exposed that.** On an earlier 40-name universe momentum returned 19.4%
+against SPY's 15.6% — more money, worse Sharpe, defensible as "a leveraged
+index fund." Across 476 names it returns 13.57% against the same 15.6%, so it
+now loses on the raw number too, at higher volatility (22.3% vs 21.0%) and a
+lower Sharpe (0.68 vs 0.80). Beta 0.87 says most of what it does earn is
+market exposure anyone can buy for free, and an information ratio of −0.11
+says the residual is not out-performance at all. Ranking 40 names is a thin
+cross-section; ranking 476 is the test the strategy was always claiming to
+pass.
 
-**Pairs trading is the cautionary tale.** Full-sample Sharpe 0.50 looks like a
-modest success. Walk-forward Sharpe is **−0.25**. The gap is not noise: it is
-the value of having selected GS/JPM as the pair *after seeing the whole
-period*. Re-select the pair on each training window and trade the following
-six months blind, and the edge disappears. Any pairs backtest that does not
-do this is reporting fiction.
+**Pairs trading is the cautionary tale, and widening the search made it a
+better one.** 476 tickers is 113,050 candidate pairs, up from 780. The best
+one found — HBAN/TFC, two regional banks — cointegrates at p = 0.0007, far
+more convincingly than anything available in the small universe. Full-sample
+Sharpe 0.18; walk-forward Sharpe **−0.18**. That is the entire lesson in one
+line: searching 145× harder bought a much better-looking pair and no
+out-of-sample edge. At p < 0.05 over 113,050 tests, roughly 5,600 pairs clear
+the bar by chance alone, so "it passed a significance test" is nearly
+uninformative unless the selection happened before the period you score on.
 
 **Mean reversion is destroyed by costs, not by being wrong.** It trades
-33,751 times at an average daily turnover of 0.22 — roughly 3.9% of capital
-per year in fees alone before it is right or wrong about anything. A backtest
-without a cost model would have shown something far more flattering, which is
+478,302 times at an average daily turnover of 0.21 — 3.6% of capital per year
+in fees alone, before it has been right or wrong about anything. A backtest
+without a cost model would show something far more flattering, which is
 precisely why the cost model exists.
 
-**Only pairs is genuinely market-neutral** — beta −0.02, max drawdown −11.3%
-against everyone else's −32% to −51%. It delivers the risk profile it
-advertises. It just does not make money out of sample.
+**Pairs still has the lowest market exposure** — beta 0.10 and a −19.4% max
+drawdown against everyone else's −34% to −38%. But it is much less neutral
+than the two-name version of this strategy was (beta −0.02, 5.8% vol on the
+40-name universe); a spread between two regional banks carries real sector
+risk, and 2023 charged it for that.
 
 ---
 
@@ -276,7 +293,7 @@ strategies than high-turnover ones.
 |  | Vectorized | Event-driven |
 |---|---|---|
 | Unit of thought | weights | shares and cash |
-| Speed (40 tickers × 5y) | ~15 ms | ~12–34 ms |
+| Speed (476 tickers × 5y) | ~16–25 ms | ~15–25 ms (C++), ~40–270 ms (Python) |
 | Can express whole-share orders | no | yes |
 | Can express a no-trade band | no | yes |
 | Sees weight drift | no | yes |
@@ -327,9 +344,10 @@ with SIMD, so the honest measurement would have been about 1x.
 
 The event-driven loop is the opposite case. It is irreducibly serial — bar
 *t+1*'s equity depends on bar *t*'s fills — and in Python each bar pays for
-roughly fifteen separate NumPy calls on 40-element arrays. At that size the
-per-call cost (allocate a temporary, check dtypes, refcount, return) dwarfs
-the ~40 multiply-adds of real arithmetic.
+roughly fifteen separate NumPy calls. The per-call cost (allocate a
+temporary, check dtypes, refcount, return) is fixed, so how much of it there
+is to remove depends entirely on how much real arithmetic sits underneath —
+which is to say, on how wide the book is.
 
 So Phase 6 was not decoration in front of Phase 7. It is what made a real
 speedup possible to measure at all.
@@ -338,26 +356,34 @@ speedup possible to measure at all.
 
 Correctness first — a speedup from code that computes something else is not a
 speedup. Across all three strategies on the real panel, the largest
-disagreement in daily returns is **7.8e-15**, with identical fill counts.
+disagreement in daily returns is **6.9e-14**, with identical fill counts.
 That is float-ordering noise: NumPy reduces pairwise, the C++ loop
 accumulates in order, so they differ in the last bit.
 
 ```
-WALL CLOCK  (real panel: 1,258 bars x 40 tickers)
+WALL CLOCK  (real panel: 1,258 bars x 476 tickers)
 
 strategy              python       cpp   speedup     (full run() end to end)
 ----------------------------------------------------------------------------
-mean_reversion       25.06ms    0.53ms     47.2x          27.5ms ->    2.7ms  (10.0x)
-momentum              9.51ms    0.34ms     27.6x          11.2ms ->    1.7ms  (6.7x)
-pairs                 7.80ms    0.24ms     32.3x           9.7ms ->    1.9ms  (5.2x)
+mean_reversion      248.42ms    9.93ms     25.0x         269.8ms ->   27.9ms  (9.7x)
+momentum             39.36ms    4.62ms      8.5x          52.2ms ->   16.3ms  (3.2x)
+pairs                11.13ms    3.90ms      2.9x          26.4ms ->   17.6ms  (1.5x)
 ```
 
-Two numbers, on purpose. The loop is what was ported, so **~28–47x** measures
+Two numbers, on purpose. The loop is what was ported, so **~3–25x** measures
 the port. But a user calls `run()`, which also builds a dozen pandas objects
 around the loop — constant work C++ never touches — so the end-to-end gain is
-**5–10x**. Quoting only the first would overstate what anyone experiences.
+**1.5–10x**. Quoting only the first would overstate what anyone experiences.
 (Run-to-run variance across strategies is real; `scripts/benchmark_cpp.py`
 regenerates the table.)
+
+These numbers are much lower than they were, and that is the interesting
+part. On the earlier 40-name universe the same table read 28–47x on the loop
+and 5–10x end to end. Widening the book to 476 tickers cut the advantage by
+roughly a factor of three without a line of either implementation changing —
+exactly what the scaling table below had predicted, which is the nicest kind
+of confirmation: a mechanism argued from a synthetic sweep, then paid out on
+the real workload.
 
 ### Why the speedup is what it is
 
@@ -369,18 +395,24 @@ SCALING  (1,258 bars, varying width -- synthetic)
 
   assets      python       cpp   speedup   python us/bar   cpp us/bar
 ---------------------------------------------------------------------
-       5      9.85ms    0.06ms    168.2x            7.83         0.05
-      20     17.86ms    0.29ms     61.8x           14.20         0.23
-      40     28.25ms    0.70ms     40.4x           22.46         0.56
-     100     61.28ms    1.87ms     32.8x           48.72         1.48
-     500    311.68ms   14.57ms     21.4x          247.76        11.58
+       5      9.65ms    0.06ms    161.8x            7.67         0.05
+      20     17.38ms    0.38ms     45.6x           13.81         0.30
+      40     28.94ms    0.70ms     41.5x           23.01         0.55
+     100     61.23ms    1.91ms     32.0x           48.67         1.52
+     500    316.08ms   11.94ms     26.5x          251.26         9.49
 ```
 
 The Python loop pays the same fixed dispatch cost per NumPy call whether the
 arrays hold 5 elements or 500, so the narrower the book, the more of the
-runtime is pure interpreter tax — and the more there is to remove. At 500
-tickers the arrays are finally large enough that NumPy's own arithmetic
-dominates, and the gap narrows to 21x.
+runtime is pure interpreter tax — and the more there is to remove. Read the
+two columns on the right: from 5 to 500 assets the Python loop gets 33×
+slower per bar while the C++ loop gets 190× slower, because C++ was only ever
+paying for the arithmetic and the arithmetic is what grew.
+
+That is why the real-panel numbers fell when the universe did not change
+shape but did change size, and it is the honest ceiling on this kind of port:
+the wider the book, the less of the runtime is interpreter tax and the less
+there is for C++ to win back.
 
 The claim is therefore not "C++ beats NumPy at arithmetic." It is "C++ does
 not pay a dispatch tax fifteen times per bar." That distinction is the whole
@@ -435,7 +467,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python -m engine.run          # full pipeline: table + charts
-pytest -q                     # 102 tests
+pytest -q                     # 106 tests
 python scripts/make_charts.py # charts only
 
 pip install -r requirements-dev.txt
@@ -466,8 +498,8 @@ fetch runs from a browser console:
 
 1. open <https://finance.yahoo.com>
 2. paste `scripts/yahoo_browser_fetch.js` into the JavaScript console
-3. `mv ~/Downloads/yahoo_panel.json data/`
-4. `python -c "from engine.data_loader import DataLoader; DataLoader().ingest_browser_panel('data/yahoo_panel.json')"`
+3. `mkdir -p data/browser && mv ~/Downloads/yahoo_panel_*.json data/browser/`
+4. `python -c "from engine.data_loader import DataLoader; DataLoader().ingest_browser_panel('data/browser')"`
 
 ---
 
@@ -475,10 +507,15 @@ fetch runs from a browser console:
 
 Stated plainly, because a backtest that does not list these is hiding them.
 
-- **Survivorship bias.** The universe is 40 companies that are listed *today*.
-  Firms that went bankrupt or were delisted over 2019–2023 are absent, so
-  every strategy here — and the SPY benchmark — is measured on a sample that
-  survived by construction. This flatters all results.
+- **Survivorship bias, and it got worse with size.** The universe is current
+  S&P 500 membership, so firms that went bankrupt, were acquired, or shrank
+  out of the index over 2019–2023 are absent entirely, and 118 of the 503
+  names *joined* the index after 2019-01-01 — holding them from the start is
+  a bet nobody could have placed. The full-coverage filter then removes 27
+  more for listing late, which biases the survivors further towards
+  already-established companies. Every one of those errors flatters results,
+  including the SPY benchmark. A point-in-time membership file is the only
+  real fix and this project does not have one.
 - **Daily data only.** No intraday prices, no order book, no microstructure.
   Fills are assumed at the adjusted close.
 - **Costs are a flat basis-point model.** Real costs vary with size, liquidity
@@ -512,7 +549,7 @@ metrics/     performance.py · validation.py
 viz/         plots.py
 cpp/         event_loop.cpp (optional pybind11 extension)
 scripts/     yahoo_browser_fetch.js · make_charts.py · benchmark_cpp.py
-tests/       102 tests
+tests/       106 tests
 .github/     CI: lint, tests on 3.11-3.13, Docker build
 notebooks/results/   generated charts and results table
 ```
