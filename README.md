@@ -527,20 +527,6 @@ tests/       106 tests
 notebooks/results/   generated charts and results table
 ```
 
-## Status
-
-- [x] Phase 0 — Scope & setup
-- [x] Phase 1 — Data layer
-- [x] Phase 2 — Vectorized core engine
-- [x] Phase 3 — Strategies
-- [x] Phase 4 — Metrics & evaluation
-- [x] Phase 5 — Visualization
-- [x] Phase 6 — Event-driven backtester *(stretch)*
-- [x] Phase 7 — C++ performance component *(stretch)*
-- [x] Phase 8 — Polish & ship
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
