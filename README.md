@@ -19,9 +19,10 @@ docker build -t backtest-engine . && docker run --rm backtest-engine
 That single command reproduces every number and chart below. No API keys, no
 network, no manual steps — the price cache is committed.
 
-**[BACKTEST.md](BACKTEST.md)** is the long-form writeup: why every way a
-backtest can be wrong makes it look better, the three bugs that nearly got
-through, and what happened when I stopped picking the stocks myself.
+**[BACKTEST.md](BACKTEST.md)** is the long-form technical writeup: the
+problem, the architecture and why it is shaped that way, the bias mitigations
+and how each is tested, full results, and the engine and performance
+analysis behind them.
 
 ---
 

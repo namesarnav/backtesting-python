@@ -1,483 +1,506 @@
-# The backtest that kept telling me I was right
+# Building a vectorized backtesting engine
 
-Here are two numbers from the same code, on the same three days of made-up
-prices, running the same trading rule.
+This is a writeup of a daily-frequency portfolio backtesting engine for US
+equities: what it does, how it is structured, why the structure is what it
+is, and what it produced. The code is Python with an optional C++ extension.
 
-**+20.77%.** And **−0.07%.**
+The headline result is negative. Three classical strategies — cross-sectional
+momentum, mean reversion, and cointegration-based pairs trading — were tested
+on 476 S&P 500 constituents over 2019–2023. None beats a passive SPY position
+on a risk-adjusted basis, and one of them only looks profitable until it is
+validated out of sample.
 
-The only difference between them is one line, and that line does something
-so obvious it sounds like a formality: it makes the portfolio hold
-*yesterday's* decision instead of today's. Delete it and a strategy that
-loses a rounding error becomes a strategy that made twenty-one percent in
-three days.
+## The problem
 
-Nothing crashes when you delete it. No warning, no exception, no NaN, no
-suspicious-looking chart. You get a smooth upward equity curve and a number
-you'd be happy to put on a slide.
+The arithmetic of a backtest is trivial: multiply positions by asset returns,
+sum across assets, compound. Four lines of pandas produce an equity curve.
 
-That asymmetry is the whole reason this project exists, and I want to state
-it plainly before anything else: **every way a backtest can be wrong makes
-the results look better.** Peek at tomorrow's price — line goes up. Pick
-which stocks to trade after seeing which ones did well — line goes up.
-Forget to charge trading fees — line goes up. Nothing in the failure
-distribution points down. The bugs are all flattering, and flattering bugs
-don't get found, because nobody investigates good news.
+The difficulty is that the result is unverifiable by inspection. A backtest
+has no ground truth to compare against, so a bug does not announce itself —
+it produces a number, and every number looks equally plausible.
 
-So I stopped thinking of this as "build a backtester." Four lines of pandas
-is a backtester. What I set out to build was a backtester I couldn't fool
-myself with, and almost every decision below follows from that one.
+Worse, the error distribution is one-sided. The common defects all bias
+results upward:
 
-I drew the scope tight on purpose: daily bars, US stocks, flat percentage
-costs. No intraday data, no order book, no options, no live trading, no
-machine learning. Each of those is its own project, and a weak version of
-one would have made everything around it less trustworthy rather than more.
+- **Look-ahead bias** — trading on information not available at decision
+  time. Returns increase.
+- **Selection bias** — choosing instruments after observing their
+  performance. Returns increase.
+- **Omitted transaction costs** — ignoring commission, slippage, and
+  turnover. Returns increase.
+- **Survivorship bias** — testing on a universe filtered by present-day
+  existence. Returns increase.
 
-## The week Yahoo stopped talking to scripts
+None of these raises an exception, and none produces an implausible chart.
+An implementation containing all four runs cleanly and reports an excellent
+Sharpe ratio. The engineering problem is therefore not "compute returns"
+but "make each of these failure modes detectable," which means each needs a
+specific mechanism and each mechanism needs a test that fails when it is
+removed.
 
-I started with the data, expecting it to be the boring part.
+Scope was fixed deliberately: daily bars, US equities, flat basis-point cost
+model. No intraday data, order book modelling, options, live trading, or
+machine learning.
 
-The first real decision was the *shape*, and it quietly determines
-everything downstream. Price data can be laid out a few ways: one row per
-(date, stock), which is what a database would hand you; a dictionary mapping
-each ticker to its own little table; or one wide table with dates going down
-and stocks going across.
+## Data layer
 
-I picked the wide table, because it makes the central calculation disappear.
-If prices are a wide grid of dates × stocks, and I build the trading signals
-in *exactly the same shape*, then "what I held times what it returned" is
-one multiplication across the entire five-year history. No looping over
-days. No looping over stocks.
+### Panel shape
 
-The dictionary version would have forced a Python loop over tickers into
-every single calculation — precisely the thing the engine exists to avoid.
-The long format would have needed a group-by on every operation. Both work.
-Both are slower and read worse. The price of the wide-table choice is that
-everything downstream has to conform to it, and I've kept that rule: when a
-strategy doesn't fit the shape, the strategy changes, not the engine.
+The most consequential early decision is the in-memory layout of price data.
+Three options were considered:
 
-Then there's a finance detail that will silently wreck you. Raw closing
-prices are useless. If a stock splits two-for-one, the price halves
-overnight, and a naive return calculation records a 50% loss that never
-happened. Same story with dividends. So the loader pulls the split- and
-dividend-adjusted close and rescales the other price fields by the same
-ratio, so they stay consistent with each other.
+| layout | structure | cost |
+|---|---|---|
+| long | one row per (date, ticker) | group-by on every operation |
+| dict of frames | ticker → DataFrame | Python loop over tickers everywhere |
+| wide panel | dates × tickers | must be enforced everywhere |
 
-And then the downloading fell apart.
+The engine uses the wide panel: a `DataFrame` with a `DatetimeIndex` and
+MultiIndex columns `(field, ticker)`, so `panel["close"]` yields a plain
+`(date × ticker)` frame. Signal panels are produced in the same shape.
 
-The plan was to hit Yahoo Finance's public price API. First the `yfinance`
-library's normal calls started failing — its authentication endpoint was
-returning HTTP 429, "too many requests," no matter how little I asked for.
-Fine, I thought, I'll skip the library and call the price endpoint directly,
-since that one doesn't need the auth step.
-
-That worked. Then it stopped working. 429 again, on my home wifi, on my
-phone's hotspot, on a different connection entirely. With cookies, without
-cookies, with the handshake, without it. Meanwhile I could open
-finance.yahoo.com in Chrome and watch the exact data render perfectly.
-
-That's when I understood the situation. Yahoo wasn't rate-limiting *me*. It
-was declining to serve scripts at all, while happily serving browsers. And
-the modern site doesn't embed price history in the page HTML, so scraping
-wasn't a fallback either.
-
-The fix is unglamorous and completely reliable: a small JavaScript file you
-paste into the browser's own console on Yahoo's site. Run there, the
-requests are indistinguishable from the page's own requests, because they
-*are* the page's own requests. It dumps JSON, and the loader reads that
-through the same parsing and adjustment code as the direct path — so however
-the prices arrived, they get treated identically. One parser, one place to
-be wrong.
-
-Then I committed the data to the repo. Around 30MB of Parquet, five years of
-daily bars, zero missing values.
-
-I want to defend that as a decision rather than excuse it as a workaround. A
-project that claims to be reproducible cannot depend on somebody else's API
-still existing. With the data committed, someone cloning this in two years
-gets identical numbers on a machine with no internet. The download path is
-still there for the day Yahoo relaxes, and it's the single place a different
-data vendor would need to be plugged in.
-
-The real lesson was that the data layer is where the unglamorous time goes,
-and that "it worked on my machine last Tuesday" is not a data source.
-
-## One line
-
-Back to the two numbers at the top.
-
-A signal computed from today's closing price cannot be traded today. The
-closing price doesn't exist until the market has closed; by the time you
-know it, the chance to act on it at that price is gone. So the engine holds
-yesterday's target:
-
-```python
-return weights.shift(self.lag_days).fillna(0.0)
-```
-
-To show that isn't decorative I built a deliberately tiny test: two stocks,
-three days. Day one, stock A jumps 10%. Day two, stock B jumps 10%. The
-strategy is a caricature — it buys whatever just moved. Without the lag it
-returns +20.77%, because it is "buying" things it has already watched go up.
-With the lag it returns −0.07%, which is the truth: it bought each winner
-the day after the winning.
-
-Both numbers are asserted in the test suite, so deleting that line produces
-a loud, specific failure rather than a great-looking chart. The engine also
-flatly refuses to run with a lag of zero. It isn't offered as an option.
-
-There are two sneakier versions of the same bug.
-
-The first: one position-sizing mode weights stocks by recent volatility, so
-a calm stock and a wild one contribute similar risk. But volatility is
-computed from prices — so lag the signal while computing the sizing from
-today's data and you've leaked the information straight back in through a
-side door. The sizing is therefore folded into the weights *before* the lag,
-so one `shift()` covers both.
-
-The second is worse, and it took me a while to properly appreciate. I'll get
-to it, because it needs a strategy to live in.
-
-Everything else in the engine is in service of not lying. Input validation,
-for instance, sounds like defensive boilerplate and isn't: pandas will
-cheerfully take two tables whose dates don't quite line up, align them for
-you, and fill the gaps with nothing. No error. Just a plausible equity curve
-computed from a portfolio that was accidentally sitting in cash a third of
-the time. The engine refuses to run rather than guess.
-
-Normalization has a similar trap. Strategies emit *desires* — "+1, long
-this," "−1, short this," "0, nothing" — and the engine turns those into
-weights that sum to a fully-invested portfolio. I divide by the sum of the
-*absolute* values, not the plain sum, because in a portfolio with balanced
-longs and shorts the plain sum is zero and you've just divided by it. Using
-absolute values means a market-neutral book comes out at 100% invested and
-0% net exposure, which is what "market neutral" is supposed to mean.
-
-And the portfolio calculation itself, after all that, is one expression:
+The reason is that it collapses the core computation to a single expression
+over the whole history:
 
 ```python
 gross_returns = (positions * asset_returns).sum(axis=1)
 ```
 
-Whole history, both dimensions, one line. That's the payoff for the
-data-shape decision made hours earlier.
+Both other layouts require iteration or reshaping at every step. The cost of
+the wide panel is that it must be enforced: when a strategy does not fit the
+shape, the strategy changes rather than the engine.
 
-There are zero `for` loops in that file. Which creates a problem: if someone
-added one later, the numbers would be *identical*. Nothing would break, no
-test would notice. So there's a test that parses the file itself and fails
-if a loop appears anywhere in it. "Vectorized" is a claim about the code, so
-I made the test read the code.
+### Price adjustment
 
-## Three ways to fool yourself
+Raw closing prices are unusable for return computation. A 2-for-1 split
+halves the quoted price overnight and registers as a −50% return. Dividends
+produce a smaller version of the same error.
 
-All three strategies implement one method — hand it prices, it hands back
-desired positions — and the engine genuinely doesn't know which one it's
-running.
+The loader fetches the split- and dividend-adjusted close and rescales
+open/high/low by the per-bar ratio `adjclose / close` so all price fields
+remain mutually consistent. Volume is left unadjusted, per convention.
 
-**Momentum** is the oldest documented pattern in stocks: things going up
-tend to keep going up for a few months. Every day I measure each stock's
-return over the last 126 trading days, rank every stock against the others
-*on that day*, and buy the top 10%.
+### Caching
 
-"Against the others" is doing a lot of work. The comparison is
-stock-versus-stock on the same day, never stock-versus-its-own-past. In a
-market where everything fell 30%, this still holds the names that fell
-least — a bet on relative strength, which is a very different and much more
-hedgeable claim than "this will go up." There's a bug I nearly wrote here:
-ranking along the wrong axis. Rank across the row and you compare stocks to
-each other today. Rank down the column and you compare today's momentum to
-last year's, which is a completely different strategy that runs without
-complaint.
+Two tiers, solving different problems:
 
-**Mean reversion** is the opposite bet on a shorter horizon: a stock that
-has shot away from its own recent average tends to snap back. Both effects
-are real; they just live on different timescales, which is why you can run
-them side by side.
+- **Per-ticker Parquet**, keyed by ticker, date range, and interval. Adding
+  one ticker to the universe re-fetches one ticker, not the whole universe.
+- **Panel-level Parquet**, keyed by a hash of (tickers, date range,
+  interval, coverage policy). Avoids re-concatenating on every run.
 
-The measure is how many standard deviations the price sits from its 20-day
-average. If a stock normally trades near $100 and typically wiggles $2, then
-$104 is two sigma rich and $97 is one and a half cheap. Dividing by the
-wiggle is what makes it comparable across stocks — a $4 move in a sleepy
-utility and a $4 move in a volatile tech name are not the same event, but
-"two sigma" means the same thing in both.
+Parquet rather than CSV preserves dtypes and avoids re-parsing date strings.
 
-The sign is easy to get backwards, and getting it backwards produces a
-strategy that still runs: a *high* score means expensive, which means
-**short** it. The tests pin the direction down for that reason.
+### Source
 
-One detail I'm happy with: the threshold to open a position and the
-threshold to close it are different — open at 1.0 sigma, close only once it
-comes back inside 0.25. With a single threshold, a stock hovering on the
-line flips in and out every other day, and since the engine charges fees on
-every change, that flickering is expensive. The gap is a deliberate brake.
+Yahoo Finance's chart API is the source. During development, `yfinance`'s
+crumb-authentication endpoint returned HTTP 429 independent of request
+volume, so the chart endpoint — which requires no crumb — is called directly.
 
-**Pairs trading** is where the interesting failure lives. Some stocks are
-economically tied together — two banks, two refiners — so while each wanders
-unpredictably alone, the *gap* between them stays fairly stable. When the
-gap stretches unusually wide you bet on it closing: buy the laggard, short
-the one that ran. If it works, it works regardless of what the market does.
+That path later stopped working as well: `query1`/`query2` return 429 to
+scripted HTTP clients on every network tested, with or without cookies,
+while `finance.yahoo.com` serves the same data to a browser. The site no
+longer embeds price history in page HTML, so scraping is not an alternative.
 
-The statistical machinery for "these two wander together" is cointegration.
-The standard test regresses one stock on the other and asks whether the
-leftover residual mean-reverts. That residual is what you actually trade,
-and the regression also gives you the hedge ratio — how many shares of one
-offset a share of the other, so market exposure cancels.
+The working route is a JavaScript file executed in the browser console on
+Yahoo's origin, where requests are indistinguishable from the page's own.
+It writes JSON, and `ingest_browser_panel()` reads it through the *same*
+parsing and adjustment code as the direct path, so provenance does not
+affect the resulting prices. The capture is chunked at 50 tickers per file
+and resumable, since the full payload exceeds 100MB.
 
-Now the sneaky look-ahead I promised.
+The resulting cache — roughly 30MB of Parquet, 1,258 trading days, zero
+NaNs — is committed to the repository. This is deliberate: reproducibility
+that depends on a third-party API remaining available is not
+reproducibility. A clone runs offline and produces identical numbers.
 
-The obvious way to build this is: test every possible pair over the whole
-five years, find the most cointegrated one, then backtest that pair over
-those same five years. It produces a gorgeous chart. It is also completely
-worthless, because you *chose the pair using knowledge of how it turned
-out.* Nobody could have known in January 2019 which pair would stay glued
-together through 2023.
+### Coverage filtering
 
-What makes this nastier than a missing `shift()` is that every single day's
-arithmetic is still correct. Nothing in the daily calculation looks wrong,
-because nothing in the daily calculation *is* wrong. The leak is entirely in
-the choice of what to trade. It's look-ahead bias wearing a lab coat.
+The universe is the S&P 500's 503 current constituents. Not all of them span
+the test window.
 
-The fix is a formation window: the first 252 days are used only to pick the
-pair and fit the hedge ratio, and no trading happens during them. Everything
-after is honest with respect to that choice.
+The original implementation resolved a ragged panel by trimming to the first
+date on which every ticker had data. With 40 long-established large caps
+that was a no-op. With the S&P 500 it is not: constituents such as COIN,
+ABNB, and PLTR listed in 2020–2021, and a single one of them would silently
+move the panel's start date forward — converting a five-year backtest into a
+two-year one with no error and no warning.
 
-## Grading my own homework
+The engine now drops the *ticker* rather than the window, and reports every
+drop by name. 27 of 503 are removed: 21 listed after the start date, 6 trade
+under symbols that did not exist before 2024. A floor at 75% of the
+requested universe raises an error rather than allowing a broken cache to
+present itself as a coverage result.
 
-Turning returns into comparable numbers has its own quiet traps.
-Annualizing uses 252 days rather than 365, because the data only has entries
-for days the market was open. Sharpe and Sortino are computed arithmetically
-while the headline return is computed geometrically, because compounding is
-what actually happened to the money — mixing the two conventions gives you a
-Sharpe that disagrees with everyone else's.
+This is a selection rule, so it is stated rather than applied silently. It
+biases the surviving universe toward companies already listed in 2019.
 
-My favourite small one: infinite Sharpe ratios. You get one by dividing by a
-standard deviation of zero, which happens any time a strategy didn't trade
-during the window you're measuring — constantly, once you start slicing
-history into pieces. Every ratio here returns "undefined" instead of
-infinity. Infinity would quietly top a leaderboard and poison any average it
-landed in. Undefined is the truthful answer.
-
-But the number that actually matters comes from walk-forward validation, and
-this is the part that changed my conclusions.
-
-A single backtest over five years tells you how a strategy did on *one*
-sample of history — and every choice I made while building it was made by
-someone who already knew what happened in that history. That's me. I picked
-a six-month momentum window and a 20-day reversion window and a 1.0-sigma
-threshold, and even if I never explicitly tuned them, I picked them with a
-general sense of what has worked in markets I've read about. The backtest
-can't see that bias. It's there anyway.
-
-Walk-forward attacks it by repeatedly splitting time: train on two years,
-test on the following six months, slide forward, repeat. Five folds. Stitch
-the test windows together and that's an out-of-sample track record — a far
-better guess at real performance than any full-sample number.
-
-The gap between the two is the real output. A strategy that scores 2.5
-in-sample and 0.1 out-of-sample is not a good strategy that got unlucky.
-It's a curve fit.
-
-One implementation detail does most of the work: each fold hands the
-strategy *only* that fold's slice of prices, never the full history.
-Momentum needs its 126 days of warm-up inside the training window so it's
-ready when the test window starts — and pairs picks its pair from the first
-chunk of whatever you hand it, so slicing per fold means the pair gets
-chosen inside the training period. Hand it the whole panel and the pair is
-frozen at 2019 forever, and you've leaked the thing you built the formation
-window to prevent.
-
-## Then I stopped picking the stocks
-
-For most of this project the universe was forty large caps I'd chosen by
-hand — a few from each sector, all names I recognized. It seemed like a
-reasonable sample. Here's what the engine said about it:
-
-| strategy | ann return | ann vol | Sharpe | **out-of-sample Sharpe** | beta |
-|---|---:|---:|---:|---:|---:|
-| mean reversion | −13.33% | 18.05% | −0.70 | **−0.89** | 0.39 |
-| momentum | 19.40% | 27.45% | 0.78 | **0.90** | 0.88 |
-| pairs | 2.80% | 5.82% | 0.50 | **−0.25** | −0.02 |
-| *SPY buy & hold* | *15.60%* | *20.99%* | *0.80* | — | *1.00* |
-
-Momentum made 19.4% a year against SPY's 15.6%. More money than the index.
-If I'd stopped at that column I'd have written this up as a win.
-
-What saved me was reading one column across. It earned that with 27.5%
-volatility against SPY's 21.0%, so per unit of risk it was already *worse*
-than just buying the index — and a beta of 0.88 said most of the return was
-market exposure anyone can buy for free. The honest description was "a
-leveraged index fund with extra trading costs."
-
-Then I replaced my forty names with the S&P 500.
-
-I want to be precise about why, because it wasn't tidiness. Ranking forty
-stocks against each other is a thin cross-section — thin enough that the
-result can hinge on a handful of names. And I picked those names. A
-cross-sectional strategy evaluated on a universe its author chose is partly
-a measurement of the author's taste, and I had no way to tell how much.
-
-476 of the 503 current constituents have complete price history over the
-window. Nothing about the code changed. Every strategy got worse.
-
-| strategy | ann return | ann vol | Sharpe | max DD | **out-of-sample Sharpe** | beta |
-|---|---:|---:|---:|---:|---:|---:|
-| mean reversion | −8.03% | 17.83% | −0.38 | −38.2% | **−0.20** | 0.39 |
-| momentum | 13.57% | 22.26% | 0.68 | −34.0% | **0.77** | 0.87 |
-| pairs | 1.55% | 16.33% | 0.18 | −19.4% | **−0.18** | 0.10 |
-| *SPY buy & hold* | *15.60%* | *20.99%* | *0.80* | *−33.7%* | — | *1.00* |
-
-Momentum no longer even wins on the raw number: 13.57% against the same
-15.6%. Its information ratio against SPY is −0.11, meaning the active part
-isn't out-performance at all, it's noise with a fee attached. The thin
-cross-section had been carrying it, and I only found that out by taking away
-my own ability to choose.
-
-Pairs is where widening the universe turned a decent lesson into a much
-sharper one. Forty stocks give you 780 possible pairs. 476 give you 113,050.
-The best of those — two regional banks — cointegrates at p = 0.0007, a far
-more convincing number than anything the small universe could offer. Full
-sample it scores 0.18. Out of sample it scores **−0.18**.
-
-So searching 145 times harder bought a much better-looking pair and exactly
-zero edge. That's the cleanest statement of the problem I could have asked
-for, and it's really a statement about multiple testing: at a 5% threshold
-across 113,050 tests you'd expect something like 5,600 pairs to look
-significant by pure chance. "It passed a cointegration test" carries almost
-no information unless the pair was chosen before the period you score it on.
-
-Mean reversion isn't wrong so much as eaten alive. It trades 478,302 times,
-about 3.6% of capital a year in fees before it has been right or wrong about
-anything. Turn the cost model off and it looks respectable. That is the
-entire argument for having a cost model.
-
-Three strategies, three different reasons for not working: one is beta in
-disguise, one is selection bias, one is transaction costs.
-
-I should be honest about which direction the remaining bias runs. Those 476
-names are the S&P 500 *as it stands today* — everything that went bankrupt
-or got acquired or shrank out of the index between 2019 and 2023 is missing
-entirely, and 118 of the names in it only joined the index after 2019, so
-holding them from the start is a trade nobody could have made. Widening the
-universe fixed my selection bias and made survivorship bias worse. Both
-errors flatter the results, including the benchmark.
-
-## Building the same thing twice
-
-At this point it worked. I built a second, completely different engine
-anyway, and this is the part I'd most want to be asked about.
-
-The first engine thinks in weights and computes the whole history in a few
-whole-table operations. The second one *simulates*: one day at a time,
-holding an actual cash balance and an actual share count for each stock,
-placing orders that fill at the closing price. Bar arrives, state updates,
-orders go out.
-
-The point wasn't redundancy. It was to find out what the fast one was
-quietly assuming, because fast and wrong is worse than slow.
-
-One design decision makes the comparison mean anything: the event-driven
-engine *calls the vectorized engine's weight calculation*. They cannot
-disagree about what to hold. So every difference between their outputs is
-attributable to *how* it gets held, rather than being two different
-portfolios doing two different things — which would have told me nothing.
-
-With fees off, the two agree to about fifteen decimal places over 1,258
-days. That's the assertion I care about, because gross return has no
-modelling choices in it. If it diverged, one of them would have a bug in the
-lag or the weighting.
-
-Getting there meant catching an off-by-one I nearly shipped.
-
-The obvious thing to write in a simulation loop is "today, fetch the target
-from `lag_days` ago." That's wrong, and it took me a while to see why. If
-orders fill at *today's* close, the position you just established is exposed
-to *tomorrow's* move — the simulation is already lagged by a day,
-structurally, just from how it works. So a configured lag of 1 has to map to
-*zero* extra delay in the loop.
-
-Write the obvious version and you double-lag the entire portfolio, forever.
-Nothing crashes. The equity curve looks fine. The two engines just quietly
-disagree by one day for eternity. I caught it by reasoning through the
-convention on the vectorized side before writing any tests, and there's now
-a test pinning the two engines' positions together so it can't drift back.
-
-And then the comparison exposed something I did not predict.
-
-The event-driven engine reports *more* trading than the vectorized one, for
-every strategy. The reason is a blind spot rather than a bug.
-
-The vectorized engine measures trading as the change in *target weights*.
-So if a strategy says "hold 5% of AAPL" every day forever, it measures zero
-trading after the initial purchase. That's just not true. Holding a constant
-*weight* is not holding a constant *position* — prices move overnight, your
-5% drifts to 5.3%, and pulling it back is a real trade a real broker really
-charges you for. The simulation tracks shares, so it sees those trades. The
-vectorized version structurally cannot.
-
-This bites hardest on pairs, where measured trading jumps 40%. Which makes
-sense once you see it: pairs holds a nearly static two-stock position, so
-almost *all* of its real trading is drift correction — exactly the category
-the fast engine is blind to. The strategy that looked cheapest to trade is
-the one whose costs were most understated. That finding fell out of the
-reconciliation; it wasn't something I went looking for.
-
-None of it reverses a conclusion. What changed is that I now know the fast
-engine's cost estimate is biased optimistic, and biased *more* for
-low-turnover strategies than high-turnover ones — the opposite of what I'd
-have guessed.
-
-The broader thing I took away: real trading systems are event-driven not
-because they're more accurate, but because in production your backtest and
-your live trader have to be the *same code*. A live trader is inherently an
-event loop. A vectorized backtest can't be run live at all — it needs the
-entire future sitting in a table before it can compute anything. It's the
-right tool for research throughput, and it will lie to you about execution,
-quietly, in the flattering direction.
-
-## The C++ part, and why its best number got smaller
-
-I wanted a compiled component, but not a fake one, so the first question was
-what to port.
-
-The tempting target is the vectorized engine's main calculation. That would
-have been a wasted weekend: it's already NumPy, which is already compiled C
-with vector instructions underneath. An honest measurement would have come
-back at roughly 1x and I'd have had a chart showing my C++ tied with
-somebody else's C.
-
-The simulation loop is the opposite situation, and this is why building it
-first mattered. It's irreducibly serial — tomorrow's equity depends on
-today's fills — and in Python each day pays for about fifteen separate NumPy
-calls. The overhead of each call (allocate a temporary, check types, manage
-reference counts, return an object) is *fixed*, so how much of it there is
-to delete depends entirely on how much real arithmetic sits underneath.
-
-So the C++ file is a line-for-line translation of the Python loop. Same
-variable names, same order of operations. Deliberately boring, because I
-want to measure the language, not compare two algorithms.
-
-Correctness came before timing, since a speedup from code that computes
-something else isn't a speedup. Across all three strategies the largest
-disagreement in daily returns is about 7e-14, with identical trade counts —
-floating-point ordering noise, because NumPy sums in pairs and my loop sums
-in order, so they differ in the last bit.
-
-The loop came out 3 to 25 times faster depending on the strategy, and 1.5 to
-10x end to end — I report both, because a user calls the full function,
-which also builds a dozen pandas objects around the loop that C++ never
-touches.
-
-Those numbers used to be bigger. On the forty-stock universe the same
-benchmark said 28 to 47 times on the loop and 5 to 10 end to end. Widening
-to 476 stocks cut it by roughly a factor of three, without either
-implementation changing by a single line.
-
-That sounds like bad news and is actually the most satisfying result in the
-project, because I'd already predicted it. Here's the measurement that
-explains it — same number of days, varying only how many stocks are in the
-portfolio:
+## Architecture
 
 ```
+configs/*.yaml          universe, strategy registry, cost/lag/validation params
+     |
+     v
+engine/data_loader.py   fetch -> adjust -> cache -> align
+     |
+  price panel           dates x (field, ticker)
+     |
+     +---------> strategies/*.py    generate_signals(panel) -> signal panel
+     |                                    |
+     +------------------------------------+
+     v                                    v
+engine/backtest.py                 engine/event_driven.py
+  VectorizedBacktester               EventDrivenBacktester
+  whole-panel arithmetic             bar loop, explicit cash and shares
+     |                                    |
+     v                                    v
+  BacktestResult  <--- same fields ---> EventDrivenResult
+     |
+     +--> metrics/performance.py   Sharpe, Sortino, max DD, Calmar, turnover
+     +--> metrics/validation.py    walk-forward folds, benchmark comparison
+     +--> viz/plots.py             equity, drawdown, rolling Sharpe
+```
+
+Four decisions hold this together.
+
+**One panel shape everywhere.** Prices and signals are identically shaped,
+so portfolio return is one element-wise multiply and a row sum. `engine/
+backtest.py` contains zero `for` loops, and a test parses the file's AST and
+fails if any loop or comprehension appears — because a loop added later
+would produce identical numbers and no behavioural test would catch it.
+
+**One strategy interface.** Every strategy implements
+`generate_signals(price_panel) -> signal_panel`. The engine does not know
+which strategy it is running. Adding a fourth is one file and one YAML
+block, with no engine change.
+
+**Configuration is not code.** Universe, costs, lag, allocation method, and
+walk-forward window sizes live in `configs/*.yaml`.
+
+**Two engines, one allocation step.** The event-driven engine calls the
+vectorized engine's `_target_weights`, so the two cannot disagree about what
+to hold. Every difference in their output is attributable to how it is held.
+
+### Execution order
+
+The vectorized engine performs, in order:
+
+1. Validate that prices and signals share an index and columns.
+2. Convert raw signals to target weights.
+3. **Lag the weights by `lag_days`.**
+4. Compute turnover from the change in lagged weights.
+5. Charge transaction cost and slippage against turnover.
+6. Multiply positions by asset returns and sum across assets.
+7. Compound into an equity curve.
+
+Step 1 is not boilerplate. pandas aligns mismatched frames silently and
+fills gaps with NaN, which yields a plausible equity curve computed from a
+portfolio that was accidentally in cash. The engine raises instead.
+
+Step 2 normalizes by the sum of *absolute* weights, not the plain sum. In a
+balanced long/short book the plain sum is zero, and dividing by it produces
+infinities. Using absolute values gives a market-neutral book 100% gross
+exposure and 0% net exposure.
+
+## Look-ahead bias
+
+A signal computed from day *t*'s close cannot be traded on day *t*; that
+price does not exist until the market has closed. The engine holds the
+previous day's target:
+
+```python
+return weights.shift(self.lag_days).fillna(0.0)
+```
+
+To quantify the effect, a synthetic panel of two assets over three days is
+used. Asset A rises 10% on day 1; asset B rises 10% on day 2. The test
+strategy buys whatever just moved.
+
+| configuration | total return |
+|---|---:|
+| lag removed | +20.77% |
+| lag present | −0.07% |
+
+Both values are asserted in the test suite. A configured lag of zero is
+rejected outright rather than offered as an option.
+
+Two related cases required separate handling:
+
+**Volatility-based sizing.** One allocation mode weights assets by inverse
+recent volatility. Volatility is computed from prices, so sizing from
+current data while lagging the signal reintroduces the leak. Sizing is
+therefore folded into the weights *before* the shift, so one operation
+covers both.
+
+**Pair selection.** Covered under Strategies below; it is a leak in the
+choice of instrument rather than in the timing of a trade.
+
+## Strategies
+
+### Cross-sectional momentum
+
+Each day, compute the trailing 126-day return for every asset, rank assets
+against each other *on that date*, and hold the top decile.
+
+The ranking axis matters. Ranking across the row compares assets to each
+other on the same day. Ranking down the column compares an asset's current
+momentum to its own history — a different strategy that runs without error.
+The former is a relative-strength bet: in a market where everything falls
+30%, it holds the assets that fell least.
+
+### Mean reversion
+
+Compute the z-score of price against its own 20-day moving average.
+Normalizing by the rolling standard deviation makes the measure comparable
+across assets: a $4 move in a utility and a $4 move in a volatile technology
+name are not equivalent events, but two sigma means the same thing in both.
+
+Sign convention: a high z-score means the asset is expensive, which implies
+a **short**. The tests pin this direction, since inverting it produces a
+strategy that still executes.
+
+Entry and exit thresholds differ — enter at 1.0 sigma, exit only inside
+0.25. With a single threshold, an asset hovering at the boundary enters and
+exits on alternating days, and since cost is charged on every position
+change, that oscillation is expensive. The gap is a deliberate hysteresis
+band.
+
+### Pairs trading
+
+Two economically linked assets may each follow a random walk while the
+spread between them remains stationary. When the spread widens, the trade is
+long the laggard and short the leader.
+
+Selection uses the Engle-Granger test: regress one price series on the
+other and test the residual for stationarity. The residual is the traded
+spread; the regression slope is the hedge ratio that cancels market
+exposure.
+
+476 assets yield 113,050 candidate pairs, which is too many for the full
+test, so candidates are pre-screened by absolute return correlation and the
+Engle-Granger test is run on the top 20.
+
+**The selection-bias problem.** Testing all 113,050 pairs over the full
+sample, selecting the most cointegrated, and then backtesting that pair over
+the same period is invalid — the instrument was chosen using knowledge of
+the outcome. Every day's arithmetic remains correct, which is what makes
+this harder to detect than a timing error: the defect is entirely in the
+choice of what to trade.
+
+The mitigation is a formation window. The first 252 days are used only to
+select the pair and fit the hedge ratio; no trading occurs during them.
+
+## Evaluation
+
+### Metric conventions
+
+- Annualization uses 252 trading days, not 365.
+- Sharpe and Sortino are computed arithmetically (mean daily return over
+  daily standard deviation, scaled by √252); headline return is computed
+  geometrically. Mixing the two conventions produces a Sharpe that is not
+  comparable to published figures.
+- Every ratio returns NaN, not infinity, when its denominator is zero. Zero
+  standard deviation occurs whenever a strategy does not trade during a
+  measurement window, which is common once history is split into folds.
+  Infinity would rank first on any leaderboard and corrupt any average
+  containing it.
+
+### Walk-forward validation
+
+A full-sample backtest measures performance on one sample of history, chosen
+by someone who already knows what happened in it. Parameter choices — a
+126-day momentum window, a 20-day reversion window, a 1.0-sigma threshold —
+carry that knowledge even when no explicit optimization was performed.
+
+Walk-forward validation splits time repeatedly: train on 504 days, test on
+the following 126, slide forward, repeat for 5 folds. Concatenating the test
+windows gives an out-of-sample track record.
+
+The gap between in-sample and out-of-sample results is the actual output. A
+strategy scoring 2.5 in-sample and 0.1 out-of-sample is not an unlucky good
+strategy; it is a curve fit.
+
+One implementation detail carries most of the weight: each fold passes the
+strategy only that fold's slice of prices, never the full history. Momentum
+needs its 126-day warm-up inside the training window. Pairs selects its pair
+from the beginning of whatever data it receives, so per-fold slicing means
+selection occurs inside the training period. Passing the full panel would
+freeze the pair at 2019 and reintroduce the leak the formation window exists
+to prevent.
+
+## Results
+
+476 S&P 500 constituents, 2019-01-02 to 2023-12-29 (1,258 trading days), net
+of 5bp transaction cost and 2bp slippage, positions lagged one day.
+
+| strategy | ann return | ann vol | Sharpe | Sortino | max DD | Calmar | **OOS Sharpe** | beta | turnover |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| mean reversion | −8.03% | 17.83% | −0.38 | −0.52 | −38.2% | −0.21 | **−0.20** | 0.39 | 0.206 |
+| momentum | 13.57% | 22.26% | 0.68 | 0.95 | −34.0% | 0.40 | **0.77** | 0.87 | 0.160 |
+| pairs | 1.55% | 16.33% | 0.18 | 0.26 | −19.4% | 0.08 | **−0.18** | 0.10 | 0.014 |
+| *SPY buy & hold* | *15.60%* | *20.99%* | *0.80* | *1.11* | *−33.7%* | *0.46* | — | *1.00* | — |
+
+### Momentum: market exposure, not alpha
+
+Momentum returns 13.57% against SPY's 15.60%, at higher volatility (22.26%
+vs 20.99%) and a lower Sharpe (0.68 vs 0.80). Beta of 0.87 indicates most of
+the return is market exposure obtainable for free. The information ratio
+against SPY is −0.11, so the active component is not out-performance.
+
+This result changed when the universe was widened. On an earlier universe of
+40 hand-selected large caps, momentum returned 19.40% against the same
+15.60% benchmark, with 27.45% volatility and Sharpe 0.78 — more money than
+the index, worse risk-adjusted performance, and defensible as "a leveraged
+index fund with extra trading costs."
+
+On 476 names it loses on the raw return as well. No code changed between the
+two runs. Ranking 40 assets is a thin cross-section, thin enough for a
+handful of constituents to determine the result, and those constituents were
+selected by the author. Widening the universe removes that degree of
+freedom.
+
+### Pairs: selection bias, quantified
+
+Full-sample Sharpe is 0.18. Out-of-sample Sharpe is −0.18.
+
+The wider universe sharpens this considerably. 40 assets provide 780
+candidate pairs; 476 provide 113,050. The best pair found — two regional
+banks — cointegrates at p = 0.0007, far stronger than anything available in
+the smaller universe, and still produces a negative out-of-sample result.
+
+This is a multiple-testing effect. At a 5% significance threshold across
+113,050 tests, approximately 5,600 pairs pass by chance alone. A
+cointegration p-value carries little information unless the pair was
+selected before the period being scored.
+
+### Mean reversion: transaction costs
+
+The strategy executes 478,302 trades at 0.206 average daily turnover,
+consuming roughly 3.6% of capital per year in costs before accounting for
+directional accuracy. With the cost model disabled it appears viable. This
+is the case for having a cost model.
+
+### Market neutrality
+
+Pairs carries the lowest market exposure — beta 0.10, max drawdown −19.4%
+against −34% to −38% elsewhere. It is noticeably less neutral than the
+40-asset version (beta −0.02, 5.82% volatility), since a spread between two
+regional banks carries sector risk that a two-name portfolio does not
+diversify away.
+
+## Engine reconciliation
+
+The event-driven engine was built after the vectorized one was working, to
+determine what the vectorized implementation was assuming. It simulates bar
+by bar with an explicit cash balance and per-asset share counts, filling
+orders at the close.
+
+Because it calls the vectorized engine's weight calculation, the two cannot
+disagree about target holdings. With costs disabled they agree on gross
+returns to approximately 1e-15 over 1,258 days.
+
+### The execution-delay off-by-one
+
+The intuitive implementation fetches the target from `lag_days` bars ago.
+This is wrong. Orders filling at bar *t*'s close establish a position
+exposed to bar *t+1*'s move, so the simulation is already lagged by one bar
+structurally. A configured `lag_days` of 1 must map to zero additional delay
+in the loop:
+
+```
+execution_delay = lag_days - 1
+```
+
+The naive version double-lags the portfolio for the entire run. Nothing
+fails; the equity curve remains plausible; the two engines disagree by one
+day indefinitely. A test now pins the two engines' positions together.
+
+### What the comparison exposed
+
+The event-driven engine reports higher turnover than the vectorized engine
+for every strategy.
+
+The vectorized engine measures turnover as the change in target *weights*.
+A strategy holding a constant 5% weight registers zero turnover after the
+initial purchase — but prices move overnight, the position drifts to 5.3%,
+and restoring it is a real trade with a real cost. The event-driven engine
+tracks shares and observes those trades. The vectorized engine structurally
+cannot.
+
+The effect is largest for pairs, where measured turnover rises 40%. Pairs
+holds a nearly static two-asset position, so almost all of its real trading
+is drift correction — precisely the category the vectorized engine cannot
+see. The strategy that appeared cheapest to trade had the most understated
+costs.
+
+Two smaller differences were investigated and kept:
+
+- **Cost timing.** The simulation charges cost on the fill bar; the
+  vectorized engine charges it on the bar the position takes effect. A
+  one-day shift, immaterial to totals.
+- **Pre-commission sizing.** Orders are sized on equity before commission,
+  because commission is unknown until the order exists. This is live-system
+  behaviour and is why the engines agree exactly only when costs are zero;
+  with costs on, gross returns differ by approximately 1e-5.
+
+No conclusion reverses. What changed is knowing that the vectorized cost
+estimate is biased optimistic, and biased more for low-turnover strategies
+than high-turnover ones.
+
+The general point: production systems are event-driven not because they are
+more accurate but because the backtest and the live trader must be the same
+code. A live trader is inherently an event loop. A vectorized backtest
+cannot be run live at all, since it requires the entire future in memory
+before computing anything.
+
+## Performance
+
+### Choosing the port target
+
+Porting the vectorized engine's aggregation to C++ would have measured
+nothing: it is already NumPy, which is compiled C with vector instructions.
+The honest result would have been approximately 1x.
+
+The event-driven loop is the opposite case. It is irreducibly serial — bar
+*t+1*'s equity depends on bar *t*'s fills — and each bar performs roughly
+fifteen NumPy calls. Per-call overhead (temporary allocation, dtype
+checking, reference counting, object construction) is fixed, so the fraction
+of runtime it represents depends on how much arithmetic sits underneath it.
+
+The C++ implementation is a line-for-line translation of the Python loop:
+same variable names, same operation order. This measures the language rather
+than comparing two algorithms.
+
+### Correctness
+
+Across all three strategies on the real panel, the largest disagreement in
+daily returns is 6.9e-14, with identical fill counts. This is
+floating-point ordering noise — NumPy reduces pairwise, the C++ loop
+accumulates sequentially.
+
+### Wall clock
+
+```
+WALL CLOCK  (real panel: 1,258 bars x 476 tickers)
+
+strategy              python       cpp   speedup     (full run() end to end)
+----------------------------------------------------------------------------
+mean_reversion      248.42ms    9.93ms     25.0x         269.8ms ->   27.9ms  (9.7x)
+momentum             39.36ms    4.62ms      8.5x          52.2ms ->   16.3ms  (3.2x)
+pairs                11.13ms    3.90ms      2.9x          26.4ms ->   17.6ms  (1.5x)
+```
+
+Two figures are reported. The loop is what was ported, so 3–25x measures the
+port. Callers invoke `run()`, which also constructs pandas objects the C++
+never touches, so the end-to-end gain is 1.5–10x.
+
+### Scaling
+
+```
+SCALING  (1,258 bars, varying width -- synthetic)
+
   assets      python       cpp   speedup   python us/bar   cpp us/bar
+---------------------------------------------------------------------
        5      9.65ms    0.06ms    161.8x            7.67         0.05
       20     17.38ms    0.38ms     45.6x           13.81         0.30
       40     28.94ms    0.70ms     41.5x           23.01         0.55
@@ -485,112 +508,127 @@ portfolio:
      500    316.08ms   11.94ms     26.5x          251.26         9.49
 ```
 
-Read the two right-hand columns. Going from 5 stocks to 500, the Python loop
-gets about 33 times slower per day while the C++ loop gets 190 times slower.
-C++ was only ever paying for the arithmetic, and the arithmetic is the part
-that grew. Python pays the same fixed dispatch cost whether the array holds
-5 elements or 500, so the narrower the portfolio, the more of the runtime is
-pure interpreter tax and the more there is to delete.
+The speedup decreases as the book widens. From 5 to 500 assets the Python
+loop becomes ~33x slower per bar while the C++ loop becomes ~190x slower:
+C++ pays only for arithmetic, and arithmetic is what scales. Python pays the
+same fixed dispatch cost regardless of array size, so a narrow book is
+mostly interpreter overhead and there is more of it to remove.
 
-So the claim was never "C++ beats NumPy at maths." It's "C++ doesn't pay a
-dispatch tax fifteen times a day." A benchmark that just said "47x faster!"
-would have hidden the entire mechanism — and would have quietly become a lie
-the moment I changed the universe. A speedup that survives changing the
-problem size without explanation is a speedup you don't understand.
+This predicted the real-panel result. On the 40-asset universe the same
+benchmark reported 28–47x on the loop and 5–10x end to end; widening to 476
+assets reduced it roughly threefold with no implementation change. The claim
+is not that C++ outperforms NumPy at arithmetic — it is that C++ does not
+pay a dispatch cost fifteen times per bar.
 
-Two things had to change to make the port work, and both turned out to be
-improvements to the *Python* side.
+The loop releases the GIL, so backtests can run concurrently on separate
+threads. A timing-based test asserts this, since removing the release would
+not change any output.
 
-The first was a genuine design flaw the port surfaced. My original loop
-counted an order as real if the change in share count exceeded a tiny
-absolute threshold. That's not scale-free — a sliver of a share of a $1
-stock and of a $1,000 stock are not the same event — and it broke.
-Specifically: hold a single stock at 100% and the target share count is
-*exactly* what you already own, so every day's difference is floating-point
-dust sitting right on the threshold, tipping either way depending on
-summation order. The two engines disagreed on the trade count by one. The
-diagnosis matters more than the fix: this wasn't a porting bug, it was a bug
-in code I'd already written and tested, which the port dragged into the
-light. Measuring the order as a *fraction of the portfolio* puts that dust
-three orders of magnitude clear of the line.
+### Two fixes the port forced
 
-The second was subtler. My equivalence tests failed on the cash balance
-differing by 5e-10, and my first instinct was that I'd mistranslated
-something. I hadn't. Cash is computed as a residual — total equity minus
-everything you're holding — and in a long/short portfolio those are two
-numbers around $2 million that nearly cancel to a balance of a few dollars.
-Cash keeps absolute precision at the scale of its *inputs* while its
-relative precision is destroyed. Textbook catastrophic cancellation,
-behaving exactly as advertised. The tests now compare dollar amounts in
-dollars and ratios relatively, because one tolerance for both would either
-fail on cash forever or wave through a real divergence in returns.
+**Fill criterion.** The original loop treated an order as real when the
+share delta exceeded an absolute threshold of 1e-12. This is not scale-free:
+1e-12 shares of a $1 asset and of a $1,000 asset are different events.
+Holding one asset at 100%, the target share count equals the current
+holding exactly, so each bar's delta is floating-point noise sitting on the
+threshold and tipping either way depending on summation order. The engines
+disagreed on trade count by one. This was a pre-existing defect that the
+port exposed rather than a porting error. Measuring the order as a fraction
+of portfolio equity places that noise three orders of magnitude below the
+threshold.
 
-The loop also releases Python's global interpreter lock, so two backtests
-can genuinely run on two threads. There's a test that asserts this by
-*timing* it, because if someone removed the release, nothing else in the
-suite would notice.
+**Tolerance selection.** Equivalence tests failed on a cash balance
+differing by 5e-10. Cash is computed as a residual — total equity minus
+holdings — and in a long/short book those are two values near $2,000,000
+that nearly cancel to a few dollars. Absolute precision is preserved at the
+scale of the inputs while relative precision is destroyed: catastrophic
+cancellation. Tests now compare dollar amounts absolutely and ratios
+relatively, since one tolerance for both would either fail permanently on
+cash or admit a genuine divergence in returns.
 
-## What the tests are actually for
+### Trade log construction
 
-There are 106 and they run in about three seconds, but the count isn't the
-point. Every one exists because some specific wrong answer would otherwise
-have looked right.
+Widening the universe exposed a separate performance defect. `_trade_log`
+melted three weight frames to long format and merged them, materializing
+`dates × tickers` rows three times before discarding nearly all of them.
 
-Some check arithmetic against numbers I worked out by hand. Some exist to
-catch a silent lie — the toy dataset asserting both +20.77% and −0.07%, or
-the one that rewrites the *future* of a price series and demands every past
-signal come back byte-identical, which is a direct assault on look-ahead
-that no amount of reading the code substitutes for.
+At 40 tickers this was invisible. At 476 it dominated: ~180ms against ~10ms
+of actual backtest arithmetic — and the same ~180ms for the pairs strategy,
+whose complete trade log is 36 rows, since the cost was proportional to the
+panel rather than to the output.
 
-Some check things nothing else could see: the loop-detector that parses the
-engine's own source, the GIL-release timing test. Both guard properties
-where the wrong behaviour produces identical output.
+Taking non-zero coordinates first makes the work proportional to the number
+of trades. `run()` fell from 187/211/191ms to 19/27/26ms across the three
+strategies, with output asserted identical row-for-row.
 
-One pair encodes a decision rather than a behaviour: the two engines must
-match *exactly* on gross returns with fees off, and may differ slightly with
-fees on. That's my modelling stance written down as an executable statement.
-They may disagree about cost, never about what was held.
+## Testing
 
-The rest are degenerate cases. A strategy that never trades. A window longer
-than the data. A flat-lined stock with zero volatility. A universe where no
-pair cointegrates. Every one is a place where a reasonable-looking
-implementation divides by zero and poisons something downstream.
+106 tests, ~3 seconds. The count is not the point; each exists because a
+specific wrong answer would otherwise look correct.
 
-## What I'd tell someone starting one of these
+- **Hand-computed baselines.** Sharpe, drawdown, and a buy-and-hold
+  portfolio verified against manual calculation rather than against the
+  implementation.
+- **Look-ahead detection.** The toy panel asserts both +20.77% and −0.07%.
+  A second test rewrites the *future* of a price series and requires every
+  past signal to be byte-identical.
+- **Properties invisible to output.** The AST loop check on
+  `engine/backtest.py`, and the GIL-release timing test. Both guard
+  behaviour whose violation produces identical results.
+- **Cross-engine agreement.** The two engines must match exactly on gross
+  returns with costs off, and may differ with costs on. This encodes a
+  modelling position as an executable assertion: they may disagree about
+  cost, never about holdings.
+- **Degenerate inputs.** A strategy that never trades; a rolling window
+  longer than the sample; a zero-volatility asset; a universe with no
+  cointegrating pair; all-zero signals. Each is a division-by-zero
+  opportunity.
 
-The whole thing ships as a Docker image that reproduces the tables, the
-engine comparison and every chart with no arguments and no network. Every
-number above is generated by the code that computes it.
+## Limitations
 
-The limitations I'd rather state than have someone find: survivorship bias,
-described earlier and worse than it looks. Costs are a flat percentage with
-no market impact. Shorts are assumed free to borrow, which they aren't,
-especially for the names mean reversion wants to short. Sharpe uses a 0%
-risk-free rate over a period when rates went from 2.4% to 5%, which makes
-every risk-adjusted number here optimistic.
+- **Survivorship bias.** The universe is present-day S&P 500 membership.
+  Companies that went bankrupt, were acquired, or left the index between
+  2019 and 2023 are absent, and 118 of the 503 constituents joined the index
+  after 2019-01-01, so holding them from the start is not a realizable
+  position. The coverage filter adds a third tilt toward already-listed
+  companies. All three flatter results, including the benchmark. A
+  point-in-time membership file is the only real fix.
+- **Daily data only.** No intraday prices, order book, or microstructure.
+  Fills are assumed at the adjusted close.
+- **Flat cost model.** Real costs vary with size, liquidity, and urgency,
+  and market impact grows with position size.
+- **No borrow costs.** Short positions are assumed freely available and free
+  to hold, which is least true for the names mean reversion wants to short.
+- **Zero risk-free rate.** Over a period when rates rose from 2.4% to 5%,
+  this makes every risk-adjusted figure optimistic.
 
-If I kept going, the first change would be re-selecting the pairs on a
-rolling basis instead of once, because I still don't know whether pairs
-failed because the idea is bad or because one pair decoupled. Then a
-survivorship-free universe. Then market impact in the cost model, which
-would penalize exactly the strategies that currently look cheapest.
+## Conclusions
 
-Three things ate most of the time, and all three turned out to be the actual
-content rather than obstacles to it. Getting the data, because a source you
-don't control can just stop working. Proving there's no look-ahead, because
-you can't do that by reading code — you have to produce a number that moves
-by 21% when you delete one line. And building the engine twice, because the
-second implementation is the only way to find out what the first one was
-assuming.
+Three strategies fail for three distinct reasons: momentum is market
+exposure with a fee attached, pairs is selection bias, mean reversion is
+transaction costs. None beats holding the index.
 
-The conclusion I'd defend hardest is the boring one: nothing here beats
-buying the index. And I want to be clear that a much better-looking version
-of this project was available the entire time, three one-line edits away —
-delete the lag, pick the pair on the full sample, turn the fees off. Each
-one would have raised the headline number. None of them would have raised an
-error.
+The methodological results are more useful than the strategy results:
 
-Most of the work was in not making them.
+1. **Universe size changes conclusions.** Widening from 40 hand-selected
+   names to 476 index constituents degraded every strategy with no code
+   change. A cross-sectional strategy evaluated on an author-selected
+   universe partly measures the author.
+2. **Search breadth requires correction.** Increasing the pair search 145x
+   produced a far stronger in-sample p-value and no out-of-sample edge.
+3. **A second implementation finds what the first assumes.** The
+   vectorized engine's turnover measurement is blind to weight drift,
+   understating pairs' costs by 40% — a result that emerged from
+   reconciliation rather than from review.
+4. **Performance claims are conditional on problem size.** The C++ speedup
+   fell threefold when the universe widened, exactly as the scaling analysis
+   predicted. A speedup that survives a change in problem size without
+   explanation is not understood.
+
+A substantially better-looking version of this project was available
+throughout, three one-line edits away: remove the lag, select the pair on
+the full sample, disable costs. Each raises the headline figure. None raises
+an error.
 
 ---
 
