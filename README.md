@@ -118,36 +118,9 @@ internalising: short-window Sharpe is extremely noisy, and a strategy
 
 ## Architecture
 
-```
-configs/*.yaml          ← universe, strategy registry, cost/lag/walk-forward params
-     │
-     ▼
-engine/data_loader.py   DataLoader
-     │                    fetch → split/dividend adjust → Parquet cache → align
-     ▼
-  price panel           wide DataFrame, dates × (field, ticker) MultiIndex
-     │
-     ├──────────────► strategies/*.py      generate_signals(panel) → signal panel
-     │                   momentum · mean_reversion · pairs
-     │                          │
-     ├──────────────────────────┤
-     ▼                          ▼
-engine/backtest.py         engine/event_driven.py
-  VectorizedBacktester       EventDrivenBacktester
-  whole-table maths          bar-by-bar loop, explicit cash + share state
-  normalize → LAG → cost     same weights, filled as orders at the close
-     │                          │
-     ▼                          ▼
-  BacktestResult             EventDrivenResult
-  returns · equity_curve ·     ...the same fields, plus
-  positions · trades ·         cash · holdings · equity · fill log
-  turnover                        │
-     │◄───────────────────────────┘
-     │      (either result works downstream — same field names)
-     ├──► metrics/performance.py   Sharpe, Sortino, max DD, Calmar, win rate, turnover
-     ├──► metrics/validation.py    walk-forward folds, SPY benchmark comparison
-     └──► viz/plots.py             equity/drawdown, rolling Sharpe, comparison
-```
+![Architecture 1](https://media.discordapp.net/attachments/836348992392265841/1546234155828781380/1.png?ex=6a9f0a46&is=6a9db8c6&hm=cae1006182260f403b6eb3cd7698ac61b3857834b47699fbee833421bc25d763&=&format=webp&quality=lossless&width=880&height=1536)
+![Architecture2](https://media.discordapp.net/attachments/836348992392265841/1546234357683978440/2.png?ex=6a9f0a76&is=6a9db8f6&hm=cfef4f99f775bda0fa8e4c325efdda5a7183ff463b66fccb3404b77ca0d3e5a8&=&format=webp&quality=lossless&width=929&height=1536)
+
 
 Five design decisions hold the whole thing together:
 
