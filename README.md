@@ -118,7 +118,6 @@ internalising: short-window Sharpe is extremely noisy, and a strategy
 
 ## Architecture
 
-![Architecture 1](https://media.discordapp.net/attachments/836348992392265841/1546234155828781380/1.png?ex=6a9f0a46&is=6a9db8c6&hm=cae1006182260f403b6eb3cd7698ac61b3857834b47699fbee833421bc25d763&=&format=webp&quality=lossless&width=880&height=1536)
 ![Architecture2](https://media.discordapp.net/attachments/836348992392265841/1546234357683978440/2.png?ex=6a9f0a76&is=6a9db8f6&hm=cfef4f99f775bda0fa8e4c325efdda5a7183ff463b66fccb3404b77ca0d3e5a8&=&format=webp&quality=lossless&width=929&height=1536)
 
 
